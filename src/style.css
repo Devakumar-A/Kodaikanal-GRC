@@ -1962,3 +1962,381 @@ tbody tr:last-child td {
     width: 100vw;
   }
 }
+
+
+/* =====================================================================
+   ROOM PICKER, ACCESSIBLE DROPDOWN & FORM VALIDATION STYLES
+   ===================================================================== */
+
+/* Required asterisk & inline validation errors */
+.required-star {
+  color: var(--status-due, #b3261e);
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+.field-error-msg {
+  color: var(--status-due, #b3261e);
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  animation: fadeIn 120ms ease-out;
+}
+
+input.has-error,
+select.has-error,
+textarea.has-error,
+.dropdown-btn.has-error {
+  border-color: var(--status-due, #b3261e) !important;
+  box-shadow: 0 0 0 1px var(--status-due, #b3261e) !important;
+}
+
+.form-error-banner {
+  background: var(--status-due-bg, #fdf1f0);
+  border: 1px solid var(--status-due-border, #f7c0be);
+  color: var(--status-due, #b3261e);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  animation: fadeIn 150ms ease-out;
+}
+
+.form-error-banner.backend-error {
+  background: #fee2e2;
+  border-color: #f87171;
+  color: #991b1b;
+}
+
+/* Accessible Dropdown Component */
+.custom-dropdown-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.dropdown-btn {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  background: #ffffff;
+  border: 1px solid var(--cream-500);
+  border-radius: var(--radius-sm);
+  color: var(--navy-700);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+  box-shadow: none;
+}
+
+.dropdown-btn:hover {
+  border-color: var(--gold-300);
+}
+
+.dropdown-btn:focus-visible {
+  outline: none;
+  border-color: var(--gold-500);
+  box-shadow: 0 0 0 3px rgba(184, 137, 58, 0.2);
+}
+
+.dropdown-btn-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-placeholder {
+  color: #9aa5b6;
+  font-weight: 400;
+}
+
+.dropdown-chevron {
+  color: var(--status-neutral);
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.dropdown-btn[aria-expanded="true"] .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+/* Desktop Dropdown Popover Panel */
+.dropdown-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 220px;
+  background: #ffffff;
+  border: 1px solid var(--cream-400);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeIn 120ms ease-out;
+}
+
+.dropdown-search-wrap {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cream-300);
+  background: var(--cream-100, #faf8f5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dropdown-search-input {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  border: 1px solid var(--cream-400);
+  border-radius: 4px;
+  outline: none;
+  background: #ffffff;
+}
+
+.dropdown-search-input:focus {
+  border-color: var(--gold-500);
+}
+
+.dropdown-options-list {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+  margin: 0;
+  list-style: none;
+}
+
+.dropdown-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--navy-800);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  user-select: none;
+}
+
+.dropdown-option:hover,
+.dropdown-option.highlighted {
+  background: var(--gold-50, #fdfbf7);
+  color: var(--navy-900);
+}
+
+.dropdown-option.selected {
+  background: var(--gold-100);
+  font-weight: 600;
+  color: var(--gold-700);
+}
+
+.dropdown-option-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.dropdown-option-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.occupancy-tag {
+  font-size: 11px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.occupancy-tag.occupied {
+  color: #b45309;
+  background: #fef3c7;
+}
+
+/* Mobile Bottom Sheet (< 640px) */
+@media (max-width: 640px) {
+  .dropdown-panel-mobile-sheet {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    min-width: 100vw !important;
+    max-height: 75vh !important;
+    border-radius: 18px 18px 0 0 !important;
+    box-shadow: 0 -8px 32px rgba(10, 21, 38, 0.3) !important;
+    z-index: 300 !important;
+    background: #ffffff !important;
+    animation: sheetSlideUpMobile 200ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  @keyframes sheetSlideUpMobile {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .dropdown-mobile-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 21, 38, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 299;
+  }
+
+  .dropdown-sheet-handle {
+    width: 38px;
+    height: 4px;
+    background: var(--cream-500);
+    border-radius: 2px;
+    margin: 10px auto 6px;
+  }
+
+  .dropdown-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--cream-400);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--navy-800);
+  }
+
+  .dropdown-options-list {
+    max-height: 50vh;
+  }
+}
+
+/* Room Picker Layout & Chips */
+.room-picker-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.room-picker-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.room-picker-col {
+  flex: 1 1 200px;
+  min-width: 170px;
+}
+
+.room-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.room-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: var(--cream-200);
+  border: 1px solid var(--gold-400);
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--navy-800);
+  animation: fadeIn 120ms ease-out;
+}
+
+.room-chip-remove {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  min-height: auto;
+  cursor: pointer;
+  color: var(--status-due, #b3261e);
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.room-chip-remove:hover {
+  color: #7f1d1d;
+}
+
+.room-picker-summary {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--navy-700);
+  margin-top: 4px;
+  background: var(--gold-50, #fdfbf7);
+  border: 1px dashed var(--gold-300);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+.previous-rooms-note {
+  font-size: 12px;
+  color: var(--status-neutral);
+  background: var(--cream-200);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  border-left: 3px solid var(--status-neutral);
+}
+
+/* Category Pill Variations */
+.badge-navy {
+  background: var(--navy-700) !important;
+  color: #ffffff !important;
+  border: 1px solid var(--navy-800) !important;
+}
+
+.badge-gold {
+  background: var(--gold-100) !important;
+  color: var(--gold-700) !important;
+  border: 1px solid var(--gold-300) !important;
+}
+
+/* Admin Room Categories Table */
+.admin-category-card {
+  background: #ffffff;
+  border: 1px solid var(--cream-400);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  margin-top: 20px;
+}

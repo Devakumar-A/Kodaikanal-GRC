@@ -40,6 +40,39 @@ export const hourlyCheckout = (checkin = new Date(), hours = 3) => new Date(chec
 export const defaultExtension = (currentCheckoutISO, time = '11:00') => defaultCheckout(new Date(currentCheckoutISO), 1, time)
 
 // ---------------------------------------------------------------------
+// 1B. ROOM FORMATTING HELPER
+// Group labels containing " - " by cottage into "Cottage (101, 102)"
+// Labels without " - " show unchanged.
+// ---------------------------------------------------------------------
+export const formatRooms = (roomNumbers) => {
+  if (!roomNumbers) return '-'
+  const arr = Array.isArray(roomNumbers) ? roomNumbers : [roomNumbers]
+  if (!arr.length) return '-'
+  const groups = new Map()
+  const standalone = []
+
+  arr.forEach(lbl => {
+    const s = String(lbl || '').trim()
+    if (!s) return
+    if (s.includes(' - ')) {
+      const parts = s.split(' - ')
+      const cottage = parts[0].trim()
+      const unit = parts.slice(1).join(' - ').trim()
+      if (!groups.has(cottage)) groups.set(cottage, [])
+      groups.get(cottage).push(unit)
+    } else {
+      standalone.push(s)
+    }
+  })
+
+  const formattedGroups = Array.from(groups.entries()).map(([cottage, units]) => {
+    return `${cottage} (${units.join(', ')})`
+  })
+
+  return [...formattedGroups, ...standalone].join(', ') || '-'
+}
+
+// ---------------------------------------------------------------------
 // 2. PAYMENT FORM LOGIC  (Payment Mode / Amount Paid / Balance)
 //    - Cash | Gpay | Card | Online  -> ONE mode only, amount = Amount Paid
 //    - Multiple                     -> show Cash/Gpay/Card/Online boxes,
@@ -75,7 +108,25 @@ export const getMyProfile = async () => {
   const { data: { user } } = await supabase.auth.getUser()
   return unwrap(await supabase.from('profiles').select('*, hotels(*)').eq('id', user.id).single())
 }
-export const getRooms = (hotelId) => supabase.from('rooms').select('room_number, room_type').eq('hotel_id', hotelId).eq('is_active', true).order('room_number').then(unwrap)
+
+export const getRooms = (hotelId) =>
+  supabase
+    .from('rooms')
+    .select('*')
+    .eq('hotel_id', hotelId)
+    .eq('is_active', true)
+    .then(({ data, error }) => {
+      if (error) {
+        return supabase.from('rooms').select('room_number, room_type').eq('hotel_id', hotelId).eq('is_active', true).order('room_number').then(unwrap)
+      }
+      return (data || []).sort((a, b) => {
+        if (a.sort_order != null && b.sort_order != null) return a.sort_order - b.sort_order
+        if (a.sort_order != null) return -1
+        if (b.sort_order != null) return 1
+        return String(a.room_number || '').localeCompare(String(b.room_number || ''), undefined, { numeric: true })
+      })
+    })
+
 export const getSources = () => supabase.from('booking_sources').select('name').eq('is_active', true).order('sort_order').then(unwrap)
 
 // Check-in + GRC. Build payload as in the SQL comment.
@@ -102,19 +153,24 @@ export const changeRooms = (stayId, rooms) =>
 
 export const getGrc = (stayId) => supabase.rpc('get_grc', { p_stay: stayId }).then(unwrap)
 
-// Report with filters + pagination.  filters: {hotel, from, to, status, source, paymentMode, paymentStatus, extended, search}
+// Report with filters + pagination.  filters: {hotel, from, to, status, source, paymentMode, paymentStatus, extended, search, roomCategory}
 export const getReport = (f = {}, page = 0, pageSize = 50) =>
   supabase.rpc('report_stays', {
     p_hotel: f.hotel ?? null, p_from: f.from ?? null, p_to: f.to ?? null,
     p_status: f.status ?? 'CHECKED_OUT', p_source: f.source ?? null,
     p_payment_mode: f.paymentMode ?? null, p_payment_status: f.paymentStatus ?? null,
     p_extended: f.extended ?? null, p_search: f.search ?? null,
-    p_limit: pageSize, p_offset: page * pageSize
+    p_limit: pageSize, p_offset: page * pageSize,
+    p_room_category: f.roomCategory ?? null
   }).then(unwrap)          // each row has total_count for the pager
 
 // Admin dashboard
 export const adminSummary = (fromDate, toDate, hotelId = null) =>
   supabase.rpc('admin_summary', { p_from: fromDate, p_to: toDate, p_hotel: hotelId }).then(unwrap)
+
+// Admin room category summary table
+export const adminRoomCategories = (fromDate, toDate, hotelId = null) =>
+  supabase.rpc('admin_room_category_summary', { p_from: fromDate, p_to: toDate, p_hotel: hotelId }).then(unwrap)
 
 // Live home screen: refresh when any stay changes + every minute (to drop expired guests)
 export function watchActive(hotelId, onChange) {
@@ -200,7 +256,8 @@ export async function printGRC(stayId) {
     <div class="col">
       <div class="sec"><div class="h">BOOKING &amp; STAY INFORMATION</div><div class="body">
         ${row('Booking Source', esc(s.booking_source || '-'))}${row('Booking ID', esc(s.booking_id || '-'))}
-        ${row('Room Number', esc((s.room_numbers || []).join(', ')))}${row('Number of Rooms', s.number_of_rooms)}
+        ${row('Room Number', esc(formatRooms(s.room_numbers)))}${s.room_category ? row('Room Type', esc(s.room_category)) : ''}
+        ${row('Number of Rooms', s.number_of_rooms)}
         ${row('Number of Guests', s.number_of_guests)}${row(s.stay_type === 'HOURLY' ? 'Stay Duration' : 'Number of Nights', nights)}
         ${row('Check-in Time', fmtIST(s.checkin_at))}${row('Original Check-out', fmtIST(s.original_checkout_at))}
         ${row('Current Check-out', fmtIST(s.current_checkout_at))}
@@ -229,25 +286,3 @@ export async function printGRC(stayId) {
   f.contentWindow.focus(); f.contentWindow.print()
   setTimeout(() => f.remove(), 2000)
 }
-
-// ---------------------------------------------------------------------
-// 5. QUICK USAGE
-// ---------------------------------------------------------------------
-// CHECK-IN
-//   const pay = computePayment({ mode:'ONLINE', total:1843, paid:1843 })
-//   if (pay.error) return alert(pay.error)
-//   const { stay_id } = await createStay({
-//     hotel_id, guest_name, mobile, address, id_proof_type:'Aadhaar Card', id_proof_number,
-//     purpose_of_visit, booking_source:'Goibibo', booking_id, number_of_guests:1,
-//     room_numbers:['203'], stay_type:'NIGHTLY', nights:1, total_amount:1843, payments: pay.payments })
-//   await printGRC(stay_id)
-//
-// HOURLY CHECK-IN:  stay_type:'HOURLY', hours:3   (checkout = now + 3h)
-//
-// EXTEND (2nd, 3rd... time is the same call)
-//   await extendStay(stayId, { new_checkout: fromISTInput(inputValue), reason, booking_source:'Walk-in',
-//        number_of_rooms:1, number_of_guests:1, amount:1500,
-//        payments: computePayment({ mode:'MULTIPLE', total:1500, split:{CASH:500, GPAY:500} }).payments })
-//
-// COLLECT BALANCE LATER:  await addBalancePayment(stayId, [{ mode:'CASH', amount:300 }])
-// CHECKOUT:               await checkoutStay(stayId)   // asks to confirm if balance pending

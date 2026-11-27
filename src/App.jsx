@@ -4,6 +4,7 @@ import logo from './assets/favicon.png'
 
 const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const MODES = ['CASH', 'GPAY', 'CARD', 'ONLINE']
+const ROOM_CATEGORIES = ['Deluxe Room', '1 BHK', '2 BHK', '3 BHK', '5 BHK']
 
 // Wrapped toast implementation that emits an event for UI rendering while preserving signature
 const toast = e => {
@@ -117,12 +118,6 @@ const IconEyeOff = () => (
   </svg>
 )
 
-const IconStar = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-  </svg>
-)
-
 const IconAlertCircle = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10" />
@@ -147,6 +142,12 @@ const IconChevronLeft = () => (
 const IconChevronRight = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="9 18 15 12 9 6" />
+  </svg>
+)
+
+const IconChevronDown = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9" />
   </svg>
 )
 
@@ -240,17 +241,527 @@ function TopBar({ title, subtitle }) {
 }
 
 // ---------------------------------------------------------------------
+// REUSABLE ACCESSIBLE DROPDOWN COMPONENT (Section A)
+// Button + popover panel, search box inside, max-height ~260px with small scroll,
+// closes on outside click / Esc / selection (single), keyboard up/down/enter,
+// aria-expanded/aria-controls, error state, bottom sheet on screens < 640px.
+// ---------------------------------------------------------------------
+function Dropdown({
+  id,
+  label,
+  required,
+  value,
+  onChange,
+  options = [],
+  placeholder = 'Select...',
+  multiple = false,
+  searchable = true,
+  error = false,
+  errorMsg = '',
+  disabled = false,
+  className = ''
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [highlightIdx, setHighlightIdx] = useState(-1)
+  const [isMobile, setIsMobile] = useState(false)
+  const wrapRef = useRef(null)
+  const searchInputRef = useRef(null)
+  const listRef = useRef(null)
+
+  // Track viewport width for bottom sheet on mobile (< 640px)
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    const handleClickOutside = e => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [open])
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (open && searchable && searchInputRef.current) {
+      setTimeout(() => searchInputRef.current?.focus(), 50)
+    }
+    if (!open) {
+      setSearch('')
+      setHighlightIdx(-1)
+    }
+  }, [open, searchable])
+
+  // Normalize options: allow array of strings or objects { value, label, tag, isOccupied }
+  const normalizedOptions = options.map(opt => {
+    if (typeof opt === 'string') return { value: opt, label: opt }
+    return opt
+  })
+
+  // Filter options by search
+  const filteredOptions = normalizedOptions.filter(opt => {
+    if (!search.trim()) return true
+    return String(opt.label || opt.value || '').toLowerCase().includes(search.toLowerCase())
+  })
+
+  // Selected values array
+  const selectedValues = multiple ? (Array.isArray(value) ? value : []) : (value ? [value] : [])
+
+  // Format button text
+  let buttonText = placeholder
+  if (!multiple) {
+    const selectedOpt = normalizedOptions.find(o => o.value === value)
+    if (selectedOpt) buttonText = selectedOpt.label
+  } else {
+    if (selectedValues.length === 1) {
+      const match = normalizedOptions.find(o => o.value === selectedValues[0])
+      buttonText = match ? match.label : selectedValues[0]
+    } else if (selectedValues.length > 1) {
+      buttonText = `${selectedValues.length} selected`
+    }
+  }
+
+  const handleToggle = () => {
+    if (disabled) return
+    setOpen(v => !v)
+  }
+
+  const handleSelect = optValue => {
+    if (multiple) {
+      const next = selectedValues.includes(optValue)
+        ? selectedValues.filter(v => v !== optValue)
+        : [...selectedValues, optValue]
+      onChange(next)
+    } else {
+      onChange(optValue)
+      setOpen(false)
+    }
+  }
+
+  // Keyboard navigation
+  const handleKeyDown = e => {
+    if (disabled) return
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        setOpen(true)
+      }
+      return
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setOpen(false)
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightIdx(idx => (idx + 1 < filteredOptions.length ? idx + 1 : 0))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightIdx(idx => (idx - 1 >= 0 ? idx - 1 : filteredOptions.length - 1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (highlightIdx >= 0 && highlightIdx < filteredOptions.length) {
+        handleSelect(filteredOptions[highlightIdx].value)
+      }
+    }
+  }
+
+  const listboxId = id ? `${id}-listbox` : undefined
+
+  return (
+    <div className={`custom-dropdown-wrap ${className}`} ref={wrapRef} id={id}>
+      {label && (
+        <label style={{ marginBottom: 5 }}>
+          <span>
+            {label} {required && <span className="required-star">*</span>}
+          </span>
+        </label>
+      )}
+
+      <button
+        type="button"
+        className={`dropdown-btn ${error ? 'has-error' : ''}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        disabled={disabled}
+        onClick={handleToggle}
+        onKeyDown={handleKeyDown}
+      >
+        <span className={`dropdown-btn-text ${!selectedValues.length ? 'dropdown-placeholder' : ''}`}>
+          {buttonText}
+        </span>
+        <span className="dropdown-chevron">
+          <IconChevronDown />
+        </span>
+      </button>
+
+      {errorMsg && (
+        <div className="field-error-msg">
+          <IconAlertCircle /> {errorMsg}
+        </div>
+      )}
+
+      {open && (
+        <>
+          {isMobile && (
+            <div className="dropdown-mobile-backdrop" onClick={() => setOpen(false)} />
+          )}
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-multiselectable={multiple ? 'true' : 'false'}
+            className={`dropdown-panel ${isMobile ? 'dropdown-panel-mobile-sheet' : ''}`}
+          >
+            {isMobile && (
+              <>
+                <div className="dropdown-sheet-handle" />
+                <div className="dropdown-sheet-header">
+                  <span>{label || placeholder}</span>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    style={{ minHeight: 'auto', padding: '2px 8px', border: 'none' }}
+                    onClick={() => setOpen(false)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </>
+            )}
+
+            {searchable && (
+              <div className="dropdown-search-wrap">
+                <IconSearch />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="dropdown-search-input"
+                  placeholder="Search options..."
+                  value={search}
+                  onChange={e => {
+                    setSearch(e.target.value)
+                    setHighlightIdx(0)
+                  }}
+                  onKeyDown={handleKeyDown}
+                />
+              </div>
+            )}
+
+            <ul className="dropdown-options-list" ref={listRef}>
+              {filteredOptions.length === 0 ? (
+                <li style={{ padding: '12px 14px', textAlign: 'center', color: 'var(--status-neutral)', fontSize: 12.5 }}>
+                  No matching options
+                </li>
+              ) : (
+                filteredOptions.map((opt, i) => {
+                  const isSelected = selectedValues.includes(opt.value)
+                  const isHighlighted = i === highlightIdx
+                  return (
+                    <li
+                      key={opt.value}
+                      role="option"
+                      aria-selected={isSelected}
+                      className={`dropdown-option ${isSelected ? 'selected' : ''} ${isHighlighted ? 'highlighted' : ''}`}
+                      onClick={() => handleSelect(opt.value)}
+                    >
+                      <div className="dropdown-option-left">
+                        {multiple && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            readOnly
+                            style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', margin: 0 }}
+                          />
+                        )}
+                        <span className="dropdown-option-text">{opt.label}</span>
+                      </div>
+                      {opt.tag && (
+                        <span className={`occupancy-tag ${opt.isOccupied ? 'occupied' : ''}`}>
+                          {opt.tag}
+                        </span>
+                      )}
+                      {!multiple && isSelected && (
+                        <span style={{ color: 'var(--gold-600)', display: 'flex', alignItems: 'center' }}>
+                          <IconCheck />
+                        </span>
+                      )}
+                    </li>
+                  )
+                })
+              )}
+            </ul>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// REUSABLE ROOM PICKER (Multiple rooms / cottages per guest)
+// 1. Room Category * dropdown (Deluxe Room | 1 BHK | 2 BHK | 3 BHK | 5 BHK). Changing clears selection.
+// 2. Deluxe Room: "Cottage *" searchable single-select -> "Room(s) *" multi-select with checkboxes.
+//    Selected rooms persist when another cottage is chosen (cross-cottage booking).
+// 3. BHK categories: "Cottage(s) *" searchable multi-select with checkboxes.
+// 4. Removable chips (x) + one summary line below.
+// 5. In-use occupancy hints as grey tags (non-blocking).
+// ---------------------------------------------------------------------
+function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initialCategory = '' }) {
+  // Helper to extract cottage name & unit number from a room row
+  const getCottage = r => r.cottage_name || (r.room_number.includes(' - ') ? r.room_number.split(' - ')[0].trim() : r.room_number.trim())
+  const getUnit = r => r.unit_no || (r.room_number.includes(' - ') ? r.room_number.split(' - ').slice(1).join(' - ').trim() : '')
+
+  // Determine initial category
+  const [category, setCategory] = useState(() => {
+    if (initialCategory && ROOM_CATEGORIES.includes(initialCategory)) return initialCategory
+    if (sel.length > 0) {
+      const match = rooms.find(r => r.room_number === sel[0])
+      if (match && ROOM_CATEGORIES.includes(match.room_type)) return match.room_type
+    }
+    return 'Deluxe Room'
+  })
+
+  // Occupancy helpers
+  const activeRoomsSet = new Set()
+  occupied.filter(s => s.status === 'ACTIVE').forEach(s => {
+    (s.room_numbers || []).forEach(rm => activeRoomsSet.add(rm))
+  })
+
+  const getDeluxeRoomOccupancy = (roomNumber, cottageName) => {
+    if (activeRoomsSet.has(roomNumber) || activeRoomsSet.has(cottageName)) {
+      return { tag: 'In use', isOccupied: true }
+    }
+    return {}
+  }
+
+  const getCottageOccupancyForDeluxe = cottageName => {
+    if (activeRoomsSet.has(cottageName)) {
+      return { tag: 'Occupied', isOccupied: true }
+    }
+    const inUseCount = [...activeRoomsSet].filter(lbl => lbl.startsWith(cottageName + ' - ')).length
+    if (inUseCount > 0) {
+      return { tag: `${inUseCount} room(s) in use`, isOccupied: true }
+    }
+    return {}
+  }
+
+  const getBhkCottageOccupancy = (roomNumber, cottageName) => {
+    if (activeRoomsSet.has(roomNumber)) {
+      return { tag: 'Occupied', isOccupied: true }
+    }
+    const inUseCount = [...activeRoomsSet].filter(lbl => lbl.startsWith(cottageName + ' - ')).length
+    if (inUseCount > 0) {
+      return { tag: `${inUseCount} room(s) in use`, isOccupied: true }
+    }
+    return {}
+  }
+
+  // Handle Category change: clears selection (never mix categories)
+  const handleCategoryChange = newCat => {
+    if (newCat !== category) {
+      setCategory(newCat)
+      setSel([])
+      setSelectedCottage('')
+    }
+  }
+
+  // Deluxe Room setup
+  const deluxeRooms = rooms.filter(r => (r.room_type || '').toLowerCase() === 'deluxe room')
+  const deluxeCottages = Array.from(new Set(deluxeRooms.map(getCottage))).filter(Boolean).sort()
+
+  const [selectedCottage, setSelectedCottage] = useState(() => {
+    if (category === 'Deluxe Room' && sel.length > 0) {
+      const match = deluxeRooms.find(r => r.room_number === sel[0])
+      if (match) return getCottage(match)
+    }
+    return deluxeCottages[0] || ''
+  })
+
+  // Keep selectedCottage valid if list changes
+  useEffect(() => {
+    if (category === 'Deluxe Room' && (!selectedCottage || !deluxeCottages.includes(selectedCottage))) {
+      setSelectedCottage(deluxeCottages[0] || '')
+    }
+  }, [category, rooms])
+
+  const currentCottageRooms = selectedCottage
+    ? deluxeRooms.filter(r => getCottage(r) === selectedCottage)
+    : []
+
+  // Deluxe Room multi-select in current cottage
+  const currentCottageSelected = sel.filter(lbl => currentCottageRooms.some(r => r.room_number === lbl))
+
+  const handleDeluxeRoomsChange = newRoomLabels => {
+    // Preserve chosen rooms from other cottages, update for current cottage
+    const otherCottageSel = sel.filter(lbl => !currentCottageRooms.some(r => r.room_number === lbl))
+    setSel([...otherCottageSel, ...newRoomLabels])
+  }
+
+  // BHK setup: multi-select cottages
+  const bhkRooms = rooms.filter(r => (r.room_type || '').toLowerCase() === category.toLowerCase())
+  const bhkCottages = bhkRooms.map(r => {
+    const cName = getCottage(r)
+    const occ = getBhkCottageOccupancy(r.room_number, cName)
+    return {
+      value: r.room_number,
+      label: cName,
+      tag: occ.tag,
+      isOccupied: occ.isOccupied
+    }
+  }).sort((a, b) => a.label.localeCompare(b.label))
+
+  // Removing a chip
+  const handleRemoveChip = rm => {
+    setSel(sel.filter(x => x !== rm))
+  }
+
+  // Summary line: e.g. "Yellow (101, 102), Sai Cottage (101) - Deluxe Room" or "Karthik Cottage, Sai Cottage - 3 BHK"
+  const summaryText = sel.length > 0 ? `${L.formatRooms(sel)} - ${category}` : ''
+
+  return (
+    <div className="room-picker-container" id="field-room_numbers">
+      <div className="room-picker-row">
+        {/* 1. Room Category dropdown */}
+        <div className="room-picker-col">
+          <Dropdown
+            id="room-category-dropdown"
+            label="Room Category"
+            required
+            value={category}
+            onChange={handleCategoryChange}
+            options={ROOM_CATEGORIES.map(c => ({ value: c, label: c }))}
+            placeholder="Select Category"
+            searchable={false}
+            error={Boolean(error && !sel.length)}
+          />
+        </div>
+
+        {/* 2. Deluxe Room: Cottage dropdown + Room(s) multi-select dropdown */}
+        {category === 'Deluxe Room' ? (
+          <>
+            <div className="room-picker-col">
+              <Dropdown
+                id="deluxe-cottage-dropdown"
+                label="Cottage"
+                required
+                value={selectedCottage}
+                onChange={setSelectedCottage}
+                options={deluxeCottages.map(c => {
+                  const occ = getCottageOccupancyForDeluxe(c)
+                  return {
+                    value: c,
+                    label: c,
+                    tag: occ.tag,
+                    isOccupied: occ.isOccupied
+                  }
+                })}
+                placeholder="Select Cottage"
+                searchable={true}
+                error={Boolean(error && !sel.length && !selectedCottage)}
+              />
+            </div>
+            <div className="room-picker-col">
+              <Dropdown
+                id="deluxe-rooms-dropdown"
+                label="Room(s)"
+                required
+                multiple={true}
+                value={currentCottageSelected}
+                onChange={handleDeluxeRoomsChange}
+                options={currentCottageRooms.map(r => {
+                  const occ = getDeluxeRoomOccupancy(r.room_number, selectedCottage)
+                  return {
+                    value: r.room_number,
+                    label: getUnit(r) || r.room_number,
+                    tag: occ.tag,
+                    isOccupied: occ.isOccupied
+                  }
+                })}
+                placeholder={selectedCottage ? 'Select Room(s)...' : 'Select Cottage First'}
+                searchable={true}
+                disabled={!selectedCottage}
+                error={Boolean(error && !sel.length)}
+              />
+            </div>
+          </>
+        ) : (
+          /* 3. BHK categories: Cottage(s) multi-select dropdown */
+          <div className="room-picker-col" style={{ flex: '2 1 340px' }}>
+            <Dropdown
+              id="bhk-cottage-dropdown"
+              label="Cottage(s)"
+              required
+              multiple={true}
+              value={sel}
+              onChange={setSel}
+              options={bhkCottages}
+              placeholder={`Select ${category} Cottage(s)...`}
+              searchable={true}
+              error={Boolean(error && !sel.length)}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* 4. Removable chips & summary line */}
+      {sel.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div className="room-chips-container">
+            {sel.map(lbl => (
+              <span key={lbl} className="room-chip">
+                <span>{lbl}</span>
+                <button
+                  type="button"
+                  className="room-chip-remove"
+                  onClick={() => handleRemoveChip(lbl)}
+                  title={`Remove ${lbl}`}
+                  aria-label={`Remove ${lbl}`}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+          {summaryText && (
+            <div className="room-picker-summary">
+              <b>Summary:</b> {summaryText}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && !sel.length && (
+        <div className="field-error-msg">
+          <IconAlertCircle /> {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
 // PAYMENT COMPONENT (Pay)
 // ---------------------------------------------------------------------
-function Pay({ total, pay, setPay }) {
+function Pay({ total, pay, setPay, error }) {
   const r = L.computePayment({ mode: pay.mode, total, paid: pay.paid, split: pay.split })
   const touched = pay.mode || pay.paid || Object.values(pay.split).some(Boolean)
   const modesList = ['GPAY', 'CARD', 'CASH', 'ONLINE', 'MULTIPLE']
 
   return (
-    <div className="card pay-component">
+    <div className="card pay-component" id="field-payment">
       <div style={{ marginBottom: 12 }}>
-        <label style={{ marginBottom: 6 }}>Payment Mode</label>
+        <label style={{ marginBottom: 6 }}>
+          <span>Payment Mode {Number(pay.paid) > 0 && <span className="required-star">*</span>}</span>
+        </label>
         <div className="mode-chips" role="radiogroup" aria-label="Payment Mode">
           {modesList.map(m => (
             <button
@@ -264,15 +775,11 @@ function Pay({ total, pay, setPay }) {
             </button>
           ))}
         </div>
-        {/* Native select kept for full programmatic compatibility & keyboard accessibility */}
-        <select
-          value={pay.mode}
-          onChange={e => setPay({ ...pay, mode: e.target.value })}
-          style={{ marginTop: 8, display: 'none' }}
-        >
-          <option value="">Select Payment Mode</option>
-          {modesList.map(m => <option key={m}>{m}</option>)}
-        </select>
+        {error && (
+          <div className="field-error-msg" style={{ marginTop: 6 }}>
+            <IconAlertCircle /> {error}
+          </div>
+        )}
       </div>
 
       <div className="grid">
@@ -322,18 +829,50 @@ function Pay({ total, pay, setPay }) {
 const blankPay = { mode: '', paid: '', split: {} }
 
 // ---------------------------------------------------------------------
-// LOGIN SCREEN (Split Screen Luxury Hero + Clean Form)
+// LOGIN SCREEN (Split Screen Luxury Hero + Clean Form with Validation)
 // ---------------------------------------------------------------------
 function Login() {
   const [f, setF] = useState({ email: '', password: '' })
+  const [errors, setErrors] = useState({})
+  const [touched, setTouched] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [backendError, setBackendError] = useState('')
+
+  const validate = () => {
+    const errs = {}
+    if (!f.email.trim()) errs.email = 'Please enter your email'
+    if (!f.password) errs.password = 'Please enter your password'
+    return errs
+  }
 
   const go = async () => {
+    setTouched(true)
+    setBackendError('')
+    const errs = validate()
+    setErrors(errs)
+    if (Object.keys(errs).length > 0) {
+      const first = Object.keys(errs)[0]
+      document.getElementById('login-' + first)?.focus()
+      return
+    }
+
     setBusy(true)
-    const { error } = await L.supabase.auth.signInWithPassword(f)
-    if (error) toast(error)
-    setBusy(false)
+    try {
+      const { error } = await L.supabase.auth.signInWithPassword({
+        email: f.email.trim(),
+        password: f.password
+      })
+      if (error) {
+        setBackendError(error.message || 'Login failed. Please check your credentials.')
+        toast(error)
+      }
+    } catch (e) {
+      setBackendError(e.message || 'An unexpected error occurred.')
+      toast(e)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -374,25 +913,48 @@ function Login() {
             <div className="login-card-sub">Please enter your staff credentials to continue</div>
           </div>
 
+          {backendError && (
+            <div className="form-error-banner backend-error" role="alert">
+              <IconAlertCircle /> {backendError}
+            </div>
+          )}
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <label>
-              <span>Email Address</span>
+              <span>Email Address <span className="required-star">*</span></span>
               <input
+                id="login-email"
                 type="email"
+                className={errors.email ? 'has-error' : ''}
                 placeholder="reception@starlighthotels.com"
                 value={f.email}
-                onChange={e => setF({ ...f, email: e.target.value })}
+                onChange={e => {
+                  setF({ ...f, email: e.target.value })
+                  if (touched) setErrors({ ...errors, email: e.target.value.trim() ? '' : 'Please enter your email' })
+                }}
+                onBlur={() => {
+                  if (touched) setErrors({ ...errors, email: f.email.trim() ? '' : 'Please enter your email' })
+                }}
               />
+              {errors.email && <div className="field-error-msg"><IconAlertCircle /> {errors.email}</div>}
             </label>
 
             <label>
-              <span>Password</span>
+              <span>Password <span className="required-star">*</span></span>
               <div className="password-input-wrap">
                 <input
+                  id="login-password"
                   type={showPassword ? 'text' : 'password'}
+                  className={errors.password ? 'has-error' : ''}
                   placeholder="••••••••••••"
                   value={f.password}
-                  onChange={e => setF({ ...f, password: e.target.value })}
+                  onChange={e => {
+                    setF({ ...f, password: e.target.value })
+                    if (touched) setErrors({ ...errors, password: e.target.value ? '' : 'Please enter your password' })
+                  }}
+                  onBlur={() => {
+                    if (touched) setErrors({ ...errors, password: f.password ? '' : 'Please enter your password' })
+                  }}
                   onKeyDown={e => e.key === 'Enter' && go()}
                 />
                 <button
@@ -404,12 +966,13 @@ function Login() {
                   {showPassword ? <IconEyeOff /> : <IconEye />}
                 </button>
               </div>
+              {errors.password && <div className="field-error-msg"><IconAlertCircle /> {errors.password}</div>}
             </label>
 
             <button
               className="btn-primary"
               style={{ marginTop: 8, height: 42 }}
-              disabled={busy || !f.email || !f.password}
+              disabled={busy}
               onClick={go}
             >
               {busy ? 'Authenticating...' : 'Sign In to Front Desk'}
@@ -422,7 +985,7 @@ function Login() {
 }
 
 // ---------------------------------------------------------------------
-// CHECK-IN SCREEN (Stepped Sections + Sticky Live Summary Card)
+// CHECK-IN SCREEN (Stepped Sections + Dropdown Room Picker + Validation)
 // ---------------------------------------------------------------------
 function CheckIn({ hotelId, onDone }) {
   const [rooms, setRooms] = useState([])
@@ -447,6 +1010,9 @@ function CheckIn({ hotelId, onDone }) {
   const [sel, setSel] = useState([])
   const [pay, setPay] = useState(blankPay)
   const [busy, setBusy] = useState(false)
+  const [errors, setErrors] = useState({})
+  const [touched, setTouched] = useState(false)
+  const [backendError, setBackendError] = useState('')
 
   useEffect(() => {
     L.getRooms(hotelId).then(setRooms).catch(toast)
@@ -454,89 +1020,246 @@ function CheckIn({ hotelId, onDone }) {
     L.getActiveStays(hotelId).then(setActive).catch(toast)
   }, [hotelId])
 
-  const set = k => e => setF({ ...f, [k]: e.target.value })
+  const set = k => e => {
+    const val = e.target.value
+    setF(prev => ({ ...prev, [k]: val }))
+    if (touched) {
+      setErrors(prev => {
+        const next = { ...prev }
+        delete next[k]
+        return next
+      })
+    }
+  }
+
   const co = f.stay_type === 'HOURLY' ? L.hourlyCheckout(new Date(), +f.hours) : L.defaultCheckout(new Date(), +f.nights)
 
-  const roomTypeOrder = ['1 BHK', 'DELUXE ROOM', '2 BHK', '3 BHK', '5 BHK']
-  const groupedRooms = rooms.reduce((acc, r) => {
-    const type = r.room_type || 'Other'
-    if (!acc[type]) acc[type] = []
-    acc[type].push(r)
-    return acc
-  }, {})
+  // Validation function
+  const validateForm = () => {
+    const errs = {}
 
-  Object.keys(groupedRooms).forEach(type => {
-    groupedRooms[type].sort((a, b) =>
-      String(a.room_number || '').localeCompare(String(b.room_number || ''), undefined, { numeric: true })
-    )
-  })
+    // Receptionist Name * (min 2 chars)
+    if (!f.receptionist_name || f.receptionist_name.trim().length < 2) {
+      errs.receptionist_name = 'Please enter the receptionist name'
+    }
 
-  const sortedTypes = Object.keys(groupedRooms).sort((a, b) => {
-    const aNorm = a.trim().toUpperCase()
-    const bNorm = b.trim().toUpperCase()
-    const idxA = roomTypeOrder.findIndex(t => t.toUpperCase() === aNorm)
-    const idxB = roomTypeOrder.findIndex(t => t.toUpperCase() === bNorm)
-    if (idxA !== -1 && idxB !== -1) return idxA - idxB
-    if (idxA !== -1) return -1
-    if (idxB !== -1) return 1
-    return a.localeCompare(b)
-  })
+    // Guest Name *
+    if (!f.guest_name || !f.guest_name.trim()) {
+      errs.guest_name = 'Please enter the guest name'
+    }
+
+    // Mobile * (7-15 chars: digits, +, space, -)
+    const mobileTrim = (f.mobile || '').trim()
+    const mobileRegex = /^[0-9+ -]{7,15}$/
+    if (!mobileTrim || !mobileRegex.test(mobileTrim)) {
+      errs.mobile = 'Enter a valid mobile number'
+    }
+
+    // Address *
+    if (!f.address || !f.address.trim()) {
+      errs.address = 'Please enter the guest address'
+    }
+
+    // ID Proof Type & Number *
+    const idTrim = (f.id_proof_number || '').trim()
+    if (!idTrim) {
+      errs.id_proof_number = 'Please enter the ID proof number'
+    } else if (f.id_proof_type === 'Aadhaar Card') {
+      const digitsOnly = idTrim.replace(/[\s-]/g, '')
+      if (!/^\d{12}$/.test(digitsOnly)) {
+        errs.id_proof_number = 'Aadhaar must be 12 digits'
+      }
+    }
+
+    // Purpose of Visit *
+    if (!f.purpose_of_visit || !f.purpose_of_visit.trim()) {
+      errs.purpose_of_visit = 'Please enter the purpose of visit'
+    }
+
+    // Booking Source * & Booking ID * (unless Walk-in or Other)
+    if (f.booking_source !== 'Walk-in' && f.booking_source !== 'Other') {
+      if (!f.booking_id || !f.booking_id.trim()) {
+        errs.booking_id = 'Booking ID is required for online bookings'
+      }
+    }
+
+    // Number of Guests * (whole number >= 1)
+    const guestsNum = Number(f.number_of_guests)
+    if (isNaN(guestsNum) || guestsNum < 1 || !Number.isInteger(guestsNum)) {
+      errs.number_of_guests = 'Enter number of guests'
+    }
+
+    // Rooms * (at least one room/cottage selected)
+    if (!sel || sel.length === 0) {
+      errs.room_numbers = 'Please select at least one room'
+    }
+
+    // Stay Nights >= 1 or Hours >= 1
+    if (f.stay_type === 'HOURLY') {
+      if (!f.hours || Number(f.hours) < 1) {
+        errs.hours = 'Hours must be at least 1'
+      }
+    } else {
+      if (!f.nights || Number(f.nights) < 1) {
+        errs.nights = 'Nights must be at least 1'
+      }
+    }
+
+    // Total Amount * (number >= 0)
+    if (f.total === '' || isNaN(Number(f.total)) || Number(f.total) < 0) {
+      errs.total = 'Enter the total amount'
+    }
+
+    // Payment validation rules
+    const r = L.computePayment({ mode: pay.mode, total: Number(f.total) || 0, paid: pay.paid, split: pay.split })
+    if (r.error) {
+      errs.payment = r.error
+    }
+
+    return errs
+  }
 
   const submit = async () => {
-    if (!f.receptionist_name.trim()) return toast('Enter receptionist name')
+    setTouched(true)
+    setBackendError('')
+    const errs = validateForm()
+    setErrors(errs)
+
+    if (Object.keys(errs).length > 0) {
+      // Scroll to and focus the first invalid field
+      const firstKey = Object.keys(errs)[0]
+      const el = document.getElementById('field-' + firstKey) || document.querySelector(`[name="${firstKey}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        const inputEl = el.querySelector('input, select, button') || el
+        inputEl.focus && inputEl.focus()
+      }
+      return
+    }
+
+    const r = L.computePayment({ mode: pay.mode, total: Number(f.total) || 0, paid: pay.paid, split: pay.split })
+
+    // Remember receptionist name
     localStorage.setItem('rname', f.receptionist_name.trim())
-    const r = L.computePayment({ mode: pay.mode, total: f.total, paid: pay.paid, split: pay.split })
-    if (r.error) return toast(r.error)
+
     setBusy(true)
     try {
       const { stay_id } = await L.createStay({
-        ...f,
         hotel_id: hotelId,
+        guest_name: f.guest_name.trim(),
+        mobile: f.mobile.trim(),
+        address: f.address.trim(),
+        id_proof_type: f.id_proof_type,
+        id_proof_number: f.id_proof_number.trim(),
+        purpose_of_visit: f.purpose_of_visit.trim(),
+        booking_source: f.booking_source,
+        booking_id: (f.booking_id || '').trim(),
+        number_of_guests: Number(f.number_of_guests),
+        number_of_rooms: sel.length,
         room_numbers: sel,
-        total_amount: +f.total || 0,
+        stay_type: f.stay_type,
+        nights: f.stay_type === 'NIGHTLY' ? Number(f.nights) : null,
+        hours: f.stay_type === 'HOURLY' ? Number(f.hours) : null,
+        total_amount: Number(f.total) || 0,
+        receptionist_name: f.receptionist_name.trim(),
         payments: r.payments
       })
       await L.printGRC(stay_id)
       onDone()
     } catch (e) {
+      setBackendError(e.message || 'Failed to create stay record')
       toast(e)
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   const pRes = L.computePayment({ mode: pay.mode, total: +f.total || 0, paid: pay.paid, split: pay.split })
 
   return (
     <div className="page-container">
+      {/* Validation Summary Banner */}
+      {touched && Object.keys(errors).length > 0 && (
+        <div className="form-error-banner" role="alert">
+          <IconAlertCircle /> Please fill the highlighted fields
+        </div>
+      )}
+
+      {/* Backend Error Banner */}
+      {backendError && (
+        <div className="form-error-banner backend-error" role="alert">
+          <IconAlertCircle /> {backendError}
+        </div>
+      )}
+
       <div className="checkin-layout">
         {/* Left Column: Form Steps */}
         <div className="checkin-main-flow">
-          {/* Step 1: Guest Details */}
+          {/* Step 1: Staff & Guest Details */}
           <div className="checkin-step-card">
             <div className="checkin-step-header">
               <span className="step-number">1</span>
-              <h3 className="step-title">Guest Information</h3>
+              <h3 className="step-title">Guest & Staff Information</h3>
             </div>
+
             <div className="grid grid-cols-2">
-              <label>
-                <span>Guest Full Name *</span>
-                <input placeholder="e.g. Anandha Krishnan" value={f.guest_name} onChange={set('guest_name')} />
+              <label id="field-receptionist_name">
+                <span>Receptionist Name <span className="required-star">*</span></span>
+                <input
+                  placeholder="e.g. Anand"
+                  className={errors.receptionist_name ? 'has-error' : ''}
+                  value={f.receptionist_name}
+                  onChange={set('receptionist_name')}
+                />
+                {errors.receptionist_name && <div className="field-error-msg"><IconAlertCircle /> {errors.receptionist_name}</div>}
               </label>
-              <label>
-                <span>Mobile Number *</span>
-                <input placeholder="10-digit mobile number" value={f.mobile} onChange={set('mobile')} />
+
+              <label id="field-guest_name">
+                <span>Guest Full Name <span className="required-star">*</span></span>
+                <input
+                  placeholder="e.g. Anandha Krishnan"
+                  className={errors.guest_name ? 'has-error' : ''}
+                  value={f.guest_name}
+                  onChange={set('guest_name')}
+                />
+                {errors.guest_name && <div className="field-error-msg"><IconAlertCircle /> {errors.guest_name}</div>}
               </label>
             </div>
-            <div style={{ marginTop: 14 }}>
-              <label>
-                <span>Residential Address</span>
-                <input placeholder="Street, City, State, PIN" value={f.address} onChange={set('address')} />
+
+            <div className="grid grid-cols-2" style={{ marginTop: 14 }}>
+              <label id="field-mobile">
+                <span>Mobile Number <span className="required-star">*</span></span>
+                <input
+                  placeholder="10-digit mobile number"
+                  className={errors.mobile ? 'has-error' : ''}
+                  value={f.mobile}
+                  onChange={set('mobile')}
+                />
+                {errors.mobile && <div className="field-error-msg"><IconAlertCircle /> {errors.mobile}</div>}
+              </label>
+
+              <label id="field-purpose_of_visit">
+                <span>Purpose of Visit <span className="required-star">*</span></span>
+                <input
+                  placeholder="Business / Vacation / Family"
+                  className={errors.purpose_of_visit ? 'has-error' : ''}
+                  value={f.purpose_of_visit}
+                  onChange={set('purpose_of_visit')}
+                />
+                {errors.purpose_of_visit && <div className="field-error-msg"><IconAlertCircle /> {errors.purpose_of_visit}</div>}
               </label>
             </div>
+
             <div style={{ marginTop: 14 }}>
-              <label>
-                <span>Purpose of Visit</span>
-                <input placeholder="Business / Vacation / Pilgrimage / Family" value={f.purpose_of_visit} onChange={set('purpose_of_visit')} />
+              <label id="field-address">
+                <span>Residential Address <span className="required-star">*</span></span>
+                <input
+                  placeholder="Street, City, State, PIN"
+                  className={errors.address ? 'has-error' : ''}
+                  value={f.address}
+                  onChange={set('address')}
+                />
+                {errors.address && <div className="field-error-msg"><IconAlertCircle /> {errors.address}</div>}
               </label>
             </div>
           </div>
@@ -548,17 +1271,23 @@ function CheckIn({ hotelId, onDone }) {
               <h3 className="step-title">Identity Verification</h3>
             </div>
             <div className="grid grid-cols-2">
-              <label>
-                <span>ID Proof Document</span>
+              <label id="field-id_proof_type">
+                <span>ID Proof Document <span className="required-star">*</span></span>
                 <select value={f.id_proof_type} onChange={set('id_proof_type')}>
                   {['Aadhaar Card', 'Driving Licence', 'Passport', 'Voter ID', 'Other'].map(x => (
                     <option key={x}>{x}</option>
                   ))}
                 </select>
               </label>
-              <label>
-                <span>Document ID Number</span>
-                <input placeholder="e.g. 5482 1928 3491" value={f.id_proof_number} onChange={set('id_proof_number')} />
+              <label id="field-id_proof_number">
+                <span>Document ID Number <span className="required-star">*</span></span>
+                <input
+                  placeholder={f.id_proof_type === 'Aadhaar Card' ? '12-digit Aadhaar number' : 'ID number'}
+                  className={errors.id_proof_number ? 'has-error' : ''}
+                  value={f.id_proof_number}
+                  onChange={set('id_proof_number')}
+                />
+                {errors.id_proof_number && <div className="field-error-msg"><IconAlertCircle /> {errors.id_proof_number}</div>}
               </label>
             </div>
           </div>
@@ -570,24 +1299,39 @@ function CheckIn({ hotelId, onDone }) {
               <h3 className="step-title">Booking Details</h3>
             </div>
             <div className="grid grid-cols-3">
-              <label>
-                <span>Booking Source</span>
+              <label id="field-booking_source">
+                <span>Booking Source <span className="required-star">*</span></span>
                 <select value={f.booking_source} onChange={set('booking_source')}>
                   {sources.map(s => <option key={s.name}>{s.name}</option>)}
                 </select>
               </label>
-              <label>
-                <span>Booking Reference ID</span>
-                <input placeholder="e.g. MMT-98213 / Walk-in" value={f.booking_id} onChange={set('booking_id')} />
+              <label id="field-booking_id">
+                <span>
+                  Booking Reference ID {f.booking_source !== 'Walk-in' && f.booking_source !== 'Other' && <span className="required-star">*</span>}
+                </span>
+                <input
+                  placeholder="e.g. MMT-98213 / Walk-in"
+                  className={errors.booking_id ? 'has-error' : ''}
+                  value={f.booking_id}
+                  onChange={set('booking_id')}
+                />
+                {errors.booking_id && <div className="field-error-msg"><IconAlertCircle /> {errors.booking_id}</div>}
               </label>
-              <label>
-                <span>Number of Guests</span>
-                <input type="number" min="1" value={f.number_of_guests} onChange={set('number_of_guests')} />
+              <label id="field-number_of_guests">
+                <span>Number of Guests <span className="required-star">*</span></span>
+                <input
+                  type="number"
+                  min="1"
+                  className={errors.number_of_guests ? 'has-error' : ''}
+                  value={f.number_of_guests}
+                  onChange={set('number_of_guests')}
+                />
+                {errors.number_of_guests && <div className="field-error-msg"><IconAlertCircle /> {errors.number_of_guests}</div>}
               </label>
             </div>
           </div>
 
-          {/* Step 4: Rooms & Stay Duration */}
+          {/* Step 4: Rooms & Stay Duration (Section A - RoomPicker) */}
           <div className="checkin-step-card">
             <div className="checkin-step-header">
               <span className="step-number">4</span>
@@ -596,7 +1340,7 @@ function CheckIn({ hotelId, onDone }) {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
               <div>
-                <label style={{ marginBottom: 6 }}>Stay Type</label>
+                <label style={{ marginBottom: 6 }}>Stay Type <span className="required-star">*</span></label>
                 <div className="segmented-control" role="group">
                   <button
                     type="button"
@@ -613,77 +1357,54 @@ function CheckIn({ hotelId, onDone }) {
                     Hourly Stay
                   </button>
                 </div>
-                {/* Keep hidden select for consistency */}
-                <select value={f.stay_type} onChange={set('stay_type')} style={{ display: 'none' }}>
-                  <option value="NIGHTLY">Nightly</option>
-                  <option value="HOURLY">Hourly</option>
-                </select>
               </div>
 
               <div style={{ minWidth: 140 }}>
                 {f.stay_type === 'HOURLY' ? (
-                  <label>
-                    <span>Stay Duration (Hours)</span>
-                    <input type="number" min="1" value={f.hours} onChange={set('hours')} />
+                  <label id="field-hours">
+                    <span>Stay Duration (Hours) <span className="required-star">*</span></span>
+                    <input
+                      type="number"
+                      min="1"
+                      className={errors.hours ? 'has-error' : ''}
+                      value={f.hours}
+                      onChange={set('hours')}
+                    />
+                    {errors.hours && <div className="field-error-msg"><IconAlertCircle /> {errors.hours}</div>}
                   </label>
                 ) : (
-                  <label>
-                    <span>Number of Nights</span>
-                    <input type="number" min="1" value={f.nights} onChange={set('nights')} />
+                  <label id="field-nights">
+                    <span>Number of Nights <span className="required-star">*</span></span>
+                    <input
+                      type="number"
+                      min="1"
+                      className={errors.nights ? 'has-error' : ''}
+                      value={f.nights}
+                      onChange={set('nights')}
+                    />
+                    {errors.nights && <div className="field-error-msg"><IconAlertCircle /> {errors.nights}</div>}
                   </label>
                 )}
               </div>
             </div>
 
-            <div>
-              <label style={{ marginBottom: 6 }}>
-                <span>Select Room(s) *</span>
-                <span className="label-sub">Click room tiles or checkboxes to allocate to this stay</span>
-              </label>
-              {sortedTypes.map(type => (
-                <div key={type} className="room-type-section">
-                  <div className="room-type-title">
-                    {type}
-                  </div>
-                  <div className="rooms-grid">
-                    {groupedRooms[type].map(r => {
-                      const isChecked = sel.includes(r.room_number)
-                      const guestCount = active.filter(s => s.status === 'ACTIVE' && s.room_numbers?.includes(r.room_number)).length
-                      return (
-                        <div
-                          key={r.room_number}
-                          className={`room-tile ${isChecked ? 'selected' : ''}`}
-                          onClick={() =>
-                            setSel(s => (s.includes(r.room_number) ? s.filter(x => x !== r.room_number) : [...s, r.room_number]))
-                          }
-                        >
-                          <div className="room-tile-top">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() =>
-                                setSel(s => (s.includes(r.room_number) ? s.filter(x => x !== r.room_number) : [...s, r.room_number]))
-                              }
-                              onClick={e => e.stopPropagation()}
-                              style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 16, height: 16, margin: 0 }}
-                            />
-                            <span className="room-tile-number">{r.room_number}</span>
-                          </div>
-                          <span className={`room-guest-tag ${guestCount > 0 ? 'has-guests' : ''}`}>
-                            {guestCount} guest(s) in
-                          </span>
-                          {isChecked && (
-                            <span className="room-tile-check">
-                              <IconCheck /> Allocated
-                            </span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
+            {/* Reusable RoomPicker Component */}
+            <RoomPicker
+              rooms={rooms}
+              sel={sel}
+              setSel={newSel => {
+                setSel(newSel)
+                if (touched && newSel.length > 0) {
+                  setErrors(prev => {
+                    const next = { ...prev }
+                    delete next.room_numbers
+                    return next
+                  })
+                }
+              }}
+              occupied={active}
+              error={errors.room_numbers}
+            />
           </div>
 
           {/* Step 5: Tariff & Payment */}
@@ -692,23 +1413,20 @@ function CheckIn({ hotelId, onDone }) {
               <span className="step-number">5</span>
               <h3 className="step-title">Tariff & Billing Settlement</h3>
             </div>
-            <label style={{ maxWidth: 260, marginBottom: 14 }}>
-              <span>Total Tariff Amount (₹) *</span>
-              <input type="number" min="0" placeholder="e.g. 3500" value={f.total} onChange={set('total')} />
+            <label id="field-total" style={{ maxWidth: 260, marginBottom: 14 }}>
+              <span>Total Tariff Amount (₹) <span className="required-star">*</span></span>
+              <input
+                type="number"
+                min="0"
+                placeholder="e.g. 3500"
+                className={errors.total ? 'has-error' : ''}
+                value={f.total}
+                onChange={set('total')}
+              />
+              {errors.total && <div className="field-error-msg"><IconAlertCircle /> {errors.total}</div>}
             </label>
 
-            <div className="card" style={{ marginBottom: 14 }}>
-              <label>
-                <span>Receptionist Name *</span>
-                <input
-                  placeholder="e.g. Anand"
-                  value={f.receptionist_name}
-                  onChange={set('receptionist_name')}
-                />
-              </label>
-            </div>
-
-            <Pay total={+f.total || 0} pay={pay} setPay={setPay} />
+            <Pay total={+f.total || 0} pay={pay} setPay={setPay} error={errors.payment} />
           </div>
         </div>
 
@@ -731,11 +1449,9 @@ function CheckIn({ hotelId, onDone }) {
             <span>Rooms Allocated</span>
             <b>
               {sel.length ? (
-                sel.map(rm => (
-                  <span key={rm} className="room-badge" style={{ marginLeft: 4 }}>
-                    {rm}
-                  </span>
-                ))
+                <span>
+                  {L.formatRooms(sel)}
+                </span>
               ) : (
                 <span style={{ color: 'var(--status-due)' }}>None selected</span>
               )}
@@ -774,7 +1490,7 @@ function CheckIn({ hotelId, onDone }) {
           <button
             className="btn-gold"
             style={{ width: '100%', marginTop: 20, height: 44, fontSize: 14 }}
-            disabled={busy || !f.guest_name || !f.mobile || !sel.length || !f.receptionist_name?.trim()}
+            disabled={busy}
             onClick={submit}
           >
             <IconPrinter />
@@ -797,17 +1513,58 @@ function Action({ s, type, onClose }) {
     source: 'Walk-in',
     co: L.toISTInput(L.defaultExtension(s.current_checkout_at))
   })
+  const [errors, setErrors] = useState({})
+  const [touched, setTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [backendError, setBackendError] = useState('')
+
   const total = type === 'extend' ? +x.amount || 0 : Number(s.balance)
 
+  const validate = () => {
+    const errs = {}
+    if (type === 'extend') {
+      if (!x.co || new Date(L.fromISTInput(x.co)) <= new Date(s.current_checkout_at)) {
+        errs.co = 'New checkout must be after the current checkout'
+      }
+      if (x.amount === '' || isNaN(Number(x.amount)) || Number(x.amount) < 0) {
+        errs.amount = 'Enter a valid extension amount'
+      }
+      const r = L.computePayment({ mode: pay.mode, total, paid: pay.paid, split: pay.split })
+      if (r.error) errs.payment = r.error
+    } else {
+      // Collect balance
+      const paidAmt = Number(pay.paid) || 0
+      if (!pay.paid || paidAmt <= 0) {
+        errs.paid = 'Amount must be greater than 0'
+      } else if (paidAmt > Number(s.balance)) {
+        errs.paid = 'Amount cannot exceed balance'
+      }
+      if (!pay.mode) {
+        errs.mode = 'Select a payment mode'
+      }
+      const r = L.computePayment({ mode: pay.mode, total: Number(s.balance), paid: pay.paid, split: pay.split })
+      if (r.error) errs.payment = r.error
+    }
+    return errs
+  }
+
   const go = async () => {
+    setTouched(true)
+    setBackendError('')
+    const errs = validate()
+    setErrors(errs)
+    if (Object.keys(errs).length > 0) return
+
     const r = L.computePayment({ mode: pay.mode, total, paid: pay.paid, split: pay.split })
-    if (r.error) return toast(r.error)
+
+    setBusy(true)
     try {
       if (type === 'extend') {
         await L.extendStay(s.id, {
           new_checkout: L.fromISTInput(x.co),
-          reason: x.reason,
+          reason: x.reason.trim(),
           booking_source: x.source,
+          number_of_rooms: (s.room_numbers || []).length || 1,
           amount: total,
           payments: r.payments
         })
@@ -816,7 +1573,10 @@ function Action({ s, type, onClose }) {
       }
       onClose(true)
     } catch (e) {
+      setBackendError(e.message || 'Operation failed')
       toast(e)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -827,39 +1587,50 @@ function Action({ s, type, onClose }) {
           <div>
             <h3>{type === 'extend' ? 'Extend Guest Stay' : 'Collect Outstanding Balance'}</h3>
             <p>
-              Guest: <b>{s.guest_name}</b> &bull; Room {s.room_numbers.join(', ')} &bull; {s.grc_number}
+              Guest: <b>{s.guest_name}</b> &bull; Room {L.formatRooms(s.room_numbers)} &bull; {s.grc_number}
             </p>
           </div>
           <button
             className="btn-ghost"
             style={{ minHeight: 'auto', padding: '4px 8px', border: 'none' }}
             onClick={() => onClose(false)}
+            disabled={busy}
           >
             ✕
           </button>
         </div>
 
+        {backendError && (
+          <div className="form-error-banner backend-error" role="alert">
+            <IconAlertCircle /> {backendError}
+          </div>
+        )}
+
         {type === 'extend' && (
           <div className="grid" style={{ marginBottom: 14 }}>
             <label>
-              <span>New Checkout Date & Time (IST)</span>
+              <span>New Checkout Date & Time (IST) <span className="required-star">*</span></span>
               <input
                 type="datetime-local"
+                className={errors.co ? 'has-error' : ''}
                 value={x.co}
                 onChange={e => setX({ ...x, co: e.target.value })}
               />
+              {errors.co && <div className="field-error-msg"><IconAlertCircle /> {errors.co}</div>}
             </label>
             <label>
-              <span>Extension Amount (₹)</span>
+              <span>Extension Amount (₹) <span className="required-star">*</span></span>
               <input
                 type="number"
                 placeholder="0"
+                className={errors.amount ? 'has-error' : ''}
                 value={x.amount}
                 onChange={e => setX({ ...x, amount: e.target.value })}
               />
+              {errors.amount && <div className="field-error-msg"><IconAlertCircle /> {errors.amount}</div>}
             </label>
             <label style={{ gridColumn: '1 / -1' }}>
-              <span>Reason for Extension</span>
+              <span>Reason for Extension (Optional)</span>
               <input
                 placeholder="e.g. Extended tour / Meeting postponed"
                 value={x.reason}
@@ -881,14 +1652,14 @@ function Action({ s, type, onClose }) {
           </div>
         )}
 
-        <Pay total={total} pay={pay} setPay={setPay} />
+        <Pay total={total} pay={pay} setPay={setPay} error={errors.payment || errors.mode || errors.paid} />
 
         <div className="modal-footer">
-          <button className="btn-ghost" onClick={() => onClose(false)}>
+          <button className="btn-ghost" onClick={() => onClose(false)} disabled={busy}>
             Cancel
           </button>
-          <button className="btn-primary" onClick={go}>
-            Confirm & Save
+          <button className="btn-primary" onClick={go} disabled={busy}>
+            {busy ? 'Saving...' : 'Confirm & Save'}
           </button>
         </div>
       </div>
@@ -897,44 +1668,36 @@ function Action({ s, type, onClose }) {
 }
 
 // ---------------------------------------------------------------------
-// EDIT ROOMS MODAL (Change Room)
+// EDIT ROOMS MODAL (Change Room - uses RoomPicker & Section A Rules)
 // ---------------------------------------------------------------------
 function EditRooms({ s, hotelId, onClose }) {
   const [rooms, setRooms] = useState([])
+  const [active, setActive] = useState([])
   const [sel, setSel] = useState(s.room_numbers || [])
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [backendError, setBackendError] = useState('')
 
   useEffect(() => {
     L.getRooms(hotelId).then(setRooms).catch(toast)
+    L.getActiveStays(hotelId).then(setActive).catch(toast)
   }, [hotelId])
 
-  const roomTypeOrder = ['1 BHK', 'DELUXE ROOM', '2 BHK', '3 BHK', '5 BHK']
-  const groupedRooms = rooms.reduce((acc, r) => {
-    const type = r.room_type || 'Other'
-    if (!acc[type]) acc[type] = []
-    acc[type].push(r)
-    return acc
-  }, {})
+  // Category matching the first part of stay.room_category (split on " + ")
+  const initialCategory = s.room_category ? s.room_category.split(' + ')[0].trim() : ''
 
-  Object.keys(groupedRooms).forEach(type => {
-    groupedRooms[type].sort((a, b) =>
-      String(a.room_number || '').localeCompare(String(b.room_number || ''), undefined, { numeric: true })
-    )
-  })
-
-  const sortedTypes = Object.keys(groupedRooms).sort((a, b) => {
-    const aNorm = a.trim().toUpperCase()
-    const bNorm = b.trim().toUpperCase()
-    const idxA = roomTypeOrder.findIndex(t => t.toUpperCase() === aNorm)
-    const idxB = roomTypeOrder.findIndex(t => t.toUpperCase() === bNorm)
-    if (idxA !== -1 && idxB !== -1) return idxA - idxB
-    if (idxA !== -1) return -1
-    if (idxB !== -1) return 1
-    return a.localeCompare(b)
-  })
+  // Check if current stay's rooms exist in the rooms list for display of "Previous: <old labels>"
+  const allCurrentRoomsExist = (s.room_numbers || []).every(rm => rooms.some(r => r.room_number === rm))
+  const showPreviousNote = !s.room_category || !allCurrentRoomsExist
 
   const save = async () => {
-    if (!sel.length) return toast('Please select at least one room')
+    setError('')
+    setBackendError('')
+    if (!sel || !sel.length) {
+      setError('Please select at least one room')
+      return
+    }
+
     setBusy(true)
     try {
       await L.changeRooms(s.id, sel)
@@ -943,6 +1706,7 @@ function EditRooms({ s, hotelId, onClose }) {
         await L.printGRC(s.id).catch(toast)
       }
     } catch (e) {
+      setBackendError(e.message || 'Failed to update rooms')
       toast(e)
     } finally {
       setBusy(false)
@@ -951,77 +1715,57 @@ function EditRooms({ s, hotelId, onClose }) {
 
   return (
     <div className="modal" role="dialog" aria-modal="true">
-      <div className="card">
+      <div className="card" style={{ maxWidth: 640 }}>
         <div className="modal-header">
           <div>
             <h3>Change room - {s.guest_name}</h3>
             <p>
-              GRC: <b>{s.grc_number}</b> &bull; Current room: <b>{s.room_numbers ? s.room_numbers.join(', ') : 'None'}</b>
+              GRC: <b>{s.grc_number}</b> &bull; Current room: <b>{L.formatRooms(s.room_numbers)}</b>{' '}
+              {s.room_category && (
+                <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`} style={{ marginLeft: 6 }}>
+                  {s.room_category}
+                </span>
+              )}
             </p>
           </div>
           <button
             className="btn-ghost"
             style={{ minHeight: 'auto', padding: '4px 8px', border: 'none' }}
             onClick={() => onClose(false)}
+            disabled={busy}
           >
             ✕
           </button>
         </div>
 
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ marginBottom: 6 }}>
-            <span>Select New Room(s) *</span>
-            <span className="label-sub">Choose one or more rooms to allocate to this stay</span>
-          </label>
-        </div>
+        {backendError && (
+          <div className="form-error-banner backend-error" role="alert">
+            <IconAlertCircle /> {backendError}
+          </div>
+        )}
 
-        <div style={{ maxHeight: '50vh', overflowY: 'auto', paddingRight: 4, margin: '8px 0 16px' }}>
-          {rooms.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--status-neutral)' }}>
-              Loading rooms...
-            </div>
-          ) : (
-            sortedTypes.map(type => (
-              <div key={type} className="room-type-section" style={{ marginTop: 12 }}>
-                <div className="room-type-title">
-                  {type}
-                </div>
-                <div className="rooms-grid">
-                  {groupedRooms[type].map(r => {
-                    const isChecked = sel.includes(r.room_number)
-                    return (
-                      <div
-                        key={r.room_number}
-                        className={`room-tile ${isChecked ? 'selected' : ''}`}
-                        style={{ minHeight: 64, padding: '10px 8px' }}
-                        onClick={() =>
-                          setSel(prev => (prev.includes(r.room_number) ? prev.filter(x => x !== r.room_number) : [...prev, r.room_number]))
-                        }
-                      >
-                        <div className="room-tile-top">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() =>
-                              setSel(prev => (prev.includes(r.room_number) ? prev.filter(x => x !== r.room_number) : [...prev, r.room_number]))
-                            }
-                            onClick={e => e.stopPropagation()}
-                            style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 16, height: 16, margin: 0 }}
-                          />
-                          <span className="room-tile-number">{r.room_number}</span>
-                        </div>
-                        {isChecked && (
-                          <span className="room-tile-check">
-                            <IconCheck /> Allocated
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ))
-          )}
+        {showPreviousNote && (
+          <div className="previous-rooms-note">
+            Previous: {L.formatRooms(s.room_numbers)}
+          </div>
+        )}
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ marginBottom: 8 }}>
+            <span>Select New Room(s) / Cottage(s) <span className="required-star">*</span></span>
+          </label>
+
+          <RoomPicker
+            rooms={rooms}
+            sel={sel}
+            setSel={newSel => {
+              setSel(newSel)
+              if (newSel.length > 0) setError('')
+            }}
+            occupied={active}
+            initialCategory={initialCategory}
+            error={error}
+          />
         </div>
 
         <div className="modal-footer">
@@ -1215,7 +1959,12 @@ function ViewStay({ stayId, onClose, onChanged }) {
                   </span>
                 </div>
                 <div className="drawer-subtitle" style={{ marginTop: 4 }}>
-                  GRC: <b>{s?.grc_number}</b> &bull; Room: <b>{(s?.room_numbers || []).join(', ') || '-'}</b>
+                  GRC: <b>{s?.grc_number}</b> &bull; Room: <b>{L.formatRooms(s?.room_numbers)}</b>{' '}
+                  {s?.room_category && (
+                    <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`} style={{ marginLeft: 6 }}>
+                      {s.room_category}
+                    </span>
+                  )}
                 </div>
               </>
             )}
@@ -1293,7 +2042,14 @@ function ViewStay({ stayId, onClose, onChanged }) {
                   </div>
                   <div className="view-stay-row">
                     <span className="view-stay-label">Room Number(s)</span>
-                    <span className="view-stay-value font-bold">{(s.room_numbers || []).join(', ') || '-'}</span>
+                    <span className="view-stay-value font-bold">
+                      {L.formatRooms(s.room_numbers)}{' '}
+                      {s.room_category && (
+                        <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`} style={{ marginLeft: 6 }}>
+                          {s.room_category}
+                        </span>
+                      )}
+                    </span>
                   </div>
                   <div className="view-stay-row">
                     <span className="view-stay-label">Number of Rooms</span>
@@ -1439,7 +2195,7 @@ function ViewStay({ stayId, onClose, onChanged }) {
                 )}
               </div>
 
-              {/* e) Extension History Table (if seq > 1 exists) */}
+              {/* e) Extension History Table */}
               {hasExtensions && (
                 <div className="view-stay-card">
                   <div className="view-stay-card-header">
@@ -1470,7 +2226,7 @@ function ViewStay({ stayId, onClose, onChanged }) {
                             <td className="tabular-nums">{L.fmtIST(g.to_at)}</td>
                             <td>{g.booking_source || '-'}</td>
                             <td className="tabular-nums">{g.booking_id || '-'}</td>
-                            <td>{(g.room_numbers || []).join(', ') || g.number_of_rooms || '-'}</td>
+                            <td>{L.formatRooms(g.room_numbers || []) || g.number_of_rooms || '-'}</td>
                             <td className="tabular-nums">{g.number_of_guests || '-'}</td>
                             <td className="tabular-nums ok" style={{ fontWeight: 600 }}>{inr(g.amount)}</td>
                             <td>{g.reason || '-'}</td>
@@ -1670,11 +2426,12 @@ function Home({ hotelId }) {
               return (
                 <tr key={s.id}>
                   <td>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {s.room_numbers.map(rm => (
-                        <span key={rm} className="room-badge">{rm}</span>
-                      ))}
-                    </div>
+                    <div style={{ fontWeight: 600 }}>{L.formatRooms(s.room_numbers)}</div>
+                    {s.room_category && (
+                      <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`} style={{ marginTop: 3 }}>
+                        {s.room_category}
+                      </span>
+                    )}
                   </td>
                   <td>
                     <button
@@ -1802,10 +2559,10 @@ function Home({ hotelId }) {
 }
 
 // ---------------------------------------------------------------------
-// REPORT SCREEN (Filters, Active Filter Chips & Ledger Table)
+// REPORT SCREEN (Filters with Room Category, Active Filter Chips & Ledger Table)
 // ---------------------------------------------------------------------
 function Report({ hotelId }) {
-  const [f, setF] = useState({ status: 'CHECKED_OUT', paymentStatus: 'PAID' })
+  const [f, setF] = useState({ status: 'CHECKED_OUT', paymentStatus: 'PAID', roomCategory: null })
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState([])
   const [act, setAct] = useState(null)
@@ -1840,6 +2597,7 @@ function Report({ hotelId }) {
 
   const activeFilters = []
   if (f.status) activeFilters.push(`Status: ${f.status}`)
+  if (f.roomCategory) activeFilters.push(`Room Type: ${f.roomCategory}`)
   if (f.paymentStatus) activeFilters.push(`Payment: ${f.paymentStatus}`)
   if (f.source) activeFilters.push(`Source: ${f.source}`)
   if (f.paymentMode) activeFilters.push(`Mode: ${f.paymentMode}`)
@@ -1882,6 +2640,15 @@ function Report({ hotelId }) {
               <option value="">All</option>
               <option>ACTIVE</option>
               <option>CHECKED_OUT</option>
+            </select>
+          </label>
+          <label>
+            <span>Room Type</span>
+            <select value={f.roomCategory || ''} onChange={set('roomCategory')}>
+              <option value="">All</option>
+              {ROOM_CATEGORIES.map(rc => (
+                <option key={rc} value={rc}>{rc}</option>
+              ))}
             </select>
           </label>
           <label>
@@ -1947,6 +2714,7 @@ function Report({ hotelId }) {
               <th>GRC</th>
               <th>Guest Details</th>
               <th>Room</th>
+              <th>Type</th>
               <th>Source</th>
               <th>Check-in (IST)</th>
               <th>Checkout (IST)</th>
@@ -1974,11 +2742,16 @@ function Report({ hotelId }) {
                   <small style={{ color: 'var(--status-neutral)', display: 'block' }} className="tabular-nums">{s.mobile}</small>
                 </td>
                 <td>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {s.room_numbers.map(rm => (
-                      <span key={rm} className="room-badge">{rm}</span>
-                    ))}
-                  </div>
+                  <div style={{ fontWeight: 600 }}>{L.formatRooms(s.room_numbers)}</div>
+                </td>
+                <td>
+                  {s.room_category ? (
+                    <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`}>
+                      {s.room_category}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td>
                   <span className="pill badge-neutral">{s.booking_source}</span>
@@ -2029,7 +2802,7 @@ function Report({ hotelId }) {
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan="10">
+                <td colSpan="11">
                   <div className="empty-state">
                     <div className="empty-state-icon">
                       <IconFileText />
@@ -2103,14 +2876,29 @@ function Report({ hotelId }) {
 }
 
 // ---------------------------------------------------------------------
-// ADMIN SCREEN (KPI Metrics, Stays-by-Source & Collected-by-Mode)
+// ADMIN SCREEN (KPI Metrics, Visual Analytics & Category Summary Table)
 // ---------------------------------------------------------------------
 function Admin({ hotelId }) {
   const t = new Date().toISOString().slice(0, 10)
   const [d, setD] = useState({ from: t, to: t })
   const [data, setData] = useState(null)
+  const [categoryData, setCategoryData] = useState([])
+  const [loadingCats, setLoadingCats] = useState(false)
 
-  const run = () => L.adminSummary(d.from, d.to, hotelId || null).then(setData).catch(toast)
+  const run = () => {
+    L.adminSummary(d.from, d.to, hotelId || null).then(setData).catch(toast)
+    setLoadingCats(true)
+    L.adminRoomCategories(d.from, d.to, hotelId || null)
+      .then(res => {
+        setCategoryData(Array.isArray(res) ? res : [])
+      })
+      .catch(err => {
+        console.warn('adminRoomCategories error:', err)
+        setCategoryData([])
+      })
+      .finally(() => setLoadingCats(false))
+  }
+
   useEffect(() => {
     run()
   }, [hotelId])
@@ -2219,6 +3007,61 @@ function Admin({ hotelId }) {
                   )
                 })}
             </div>
+          </div>
+
+          {/* Room Category Performance Summary Table (Section A requirement) */}
+          <div className="admin-category-card">
+            <div className="card-header" style={{ marginBottom: 12 }}>
+              <h3 className="card-title">
+                <IconBed /> Category Performance Breakdown
+              </h3>
+              <span className="badge badge-navy">
+                {d.from} to {d.to}
+              </span>
+            </div>
+
+            {loadingCats ? (
+              <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--status-neutral)' }}>
+                Loading room category summary...
+              </div>
+            ) : categoryData.length === 0 ? (
+              <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--status-neutral)', fontSize: 13 }}>
+                No category records found for this period.
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Room Type</th>
+                      <th>Bookings</th>
+                      <th>Billed</th>
+                      <th>Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categoryData.map((row, idx) => {
+                      const typeName = row.room_type || row.room_category || row.category || 'Standard'
+                      const bookingsCount = row.bookings ?? row.count ?? row.stays ?? 0
+                      const billedAmt = row.billed ?? row.total_billed ?? row.amount ?? 0
+                      const collectedAmt = row.collected ?? row.total_collected ?? row.paid ?? 0
+                      return (
+                        <tr key={idx}>
+                          <td>
+                            <span className={`pill ${String(typeName).includes('BHK') ? 'badge-navy' : 'badge-gold'}`}>
+                              {typeName}
+                            </span>
+                          </td>
+                          <td className="tabular-nums font-bold">{bookingsCount}</td>
+                          <td className="tabular-nums font-serif">{inr(billedAmt)}</td>
+                          <td className="tabular-nums font-serif ok">{inr(collectedAmt)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       )}
