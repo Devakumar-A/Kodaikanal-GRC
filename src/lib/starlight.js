@@ -2,7 +2,7 @@
 //  STARLIGHT HOTELS - CLIENT INTEGRATION (supabase-js v2)
 //  Works with starlight_schema.sql
 // =====================================================================
-import logoImg from '../assets/logo.png'
+import logoImg from '../assets/favicon.png'
 import { createClient } from '@supabase/supabase-js'
 
 export const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)

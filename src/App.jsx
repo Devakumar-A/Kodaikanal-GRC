@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as L from './lib/starlight'
-import logo from './assets/logo.png'
+import logo from './assets/favicon.png'
 
 const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const MODES = ['CASH', 'GPAY', 'CARD', 'ONLINE']
