@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import * as L from './lib/starlight'
 import logo from './assets/favicon.png'
 
@@ -1038,12 +1038,554 @@ function EditRooms({ s, hotelId, onClose }) {
 }
 
 // ---------------------------------------------------------------------
+// ROW MORE MENU (Change room, Extend)
+// ---------------------------------------------------------------------
+function RowMoreMenu({ items }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleClick = e => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false)
+    }
+    const handleKey = e => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  if (!items || !items.length) return null
+
+  return (
+    <div ref={menuRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        className="btn-ghost btn-sm"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="More actions"
+        title="More actions"
+        onClick={() => setOpen(v => !v)}
+        style={{ minWidth: 32, padding: '4px 8px', fontWeight: 700 }}
+      >
+        •••
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 'calc(100% + 4px)',
+            background: '#ffffff',
+            border: '1px solid var(--cream-400)',
+            borderRadius: 'var(--radius-md)',
+            boxShadow: 'var(--shadow-md)',
+            zIndex: 60,
+            minWidth: 145,
+            padding: '4px 0',
+            animation: 'fadeIn 120ms ease-out'
+          }}
+        >
+          {items.map((item, i) => (
+            <button
+              key={i}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                item.onClick()
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                padding: '8px 12px',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--navy-800)',
+                fontSize: 12.5,
+                fontWeight: 500,
+                textAlign: 'left',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--cream-100, #faf8f5)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// VIEW STAY DRAWER (Guest, Booking, Payments, Extensions, Records)
+// ---------------------------------------------------------------------
+function ViewStay({ stayId, onClose, onChanged }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [subAct, setSubAct] = useState(null)
+  const [subEditRoomsStay, setSubEditRoomsStay] = useState(null)
+  const drawerRef = useRef(null)
+
+  const load = () => {
+    setLoading(true)
+    L.getGrc(stayId)
+      .then(d => {
+        setData(d)
+        setLoading(false)
+      })
+      .catch(err => {
+        toast(err)
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    if (stayId) load()
+  }, [stayId])
+
+  useEffect(() => {
+    const handleKey = e => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKey)
+    drawerRef.current?.focus()
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
+  const s = data?.stay
+  const segments = data?.segments || []
+  const payments = data?.payments || []
+
+  const byMode = Object.fromEntries(MODES.map(m => [m, 0]))
+  payments.forEach(p => {
+    const amt = Number(p.amount) || 0
+    const factor = p.kind === 'REFUND' ? -1 : 1
+    if (byMode[p.mode] !== undefined) {
+      byMode[p.mode] += factor * amt
+    }
+  })
+
+  const hasExtensions = segments.some(g => g.seq > 1)
+
+  const paymentKindLabels = {
+    CHECKIN: 'Advance',
+    EXTENSION: 'Extension',
+    BALANCE: 'Balance paid',
+    REFUND: 'Refund'
+  }
+
+  return (
+    <div className="drawer-backdrop" onClick={onClose} role="presentation">
+      <div
+        className="drawer-sheet"
+        ref={drawerRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={s ? `Stay details - ${s.guest_name}` : 'Stay details'}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="drawer-header">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {loading ? (
+              <div className="skeleton-line" style={{ width: 180, height: 22 }} />
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <h3 className="drawer-title" style={{ margin: 0 }}>{s?.guest_name}</h3>
+                  <span className={`pill ${s?.status === 'ACTIVE' ? 'badge-success' : 'badge-neutral'}`}>
+                    {s?.status === 'ACTIVE' ? 'ACTIVE' : 'CHECKED OUT'}
+                  </span>
+                  <span className={`pill ${s?.payment_status === 'PAID' ? 'badge-success' : s?.payment_status === 'PARTIAL' ? 'badge-gold' : 'badge-danger'}`}>
+                    {s?.payment_status || (s?.balance > 0 ? 'PENDING' : 'PAID')}
+                  </span>
+                </div>
+                <div className="drawer-subtitle" style={{ marginTop: 4 }}>
+                  GRC: <b>{s?.grc_number}</b> &bull; Room: <b>{(s?.room_numbers || []).join(', ') || '-'}</b>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn-ghost drawer-close-btn"
+            onClick={onClose}
+            aria-label="Close stay details"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="drawer-body">
+          {loading ? (
+            <div className="drawer-skeleton">
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+              <div className="skeleton-card" />
+            </div>
+          ) : !s ? (
+            <div className="empty-state" style={{ padding: 40 }}>
+              <p>Unable to load stay details.</p>
+            </div>
+          ) : (
+            <>
+              {/* a) Guest Details */}
+              <div className="view-stay-card">
+                <div className="view-stay-card-header">
+                  <IconUser /> Guest Information
+                </div>
+                <div className="view-stay-rows">
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Guest Name</span>
+                    <span className="view-stay-value">{s.guest_name || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Mobile Number</span>
+                    <span className="view-stay-value tabular-nums">{s.mobile || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Address</span>
+                    <span className="view-stay-value">{s.address || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">ID Proof Type</span>
+                    <span className="view-stay-value">{s.id_proof_type || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">ID Proof Number</span>
+                    <span className="view-stay-value tabular-nums">{s.id_proof_number || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Purpose of Visit</span>
+                    <span className="view-stay-value">{s.purpose_of_visit || '-'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* b) Booking & Stay */}
+              <div className="view-stay-card">
+                <div className="view-stay-card-header">
+                  <IconBed /> Booking &amp; Stay Details
+                </div>
+                <div className="view-stay-rows">
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Booking Source</span>
+                    <span className="view-stay-value">{s.booking_source || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Booking ID</span>
+                    <span className="view-stay-value tabular-nums">{s.booking_id || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Room Number(s)</span>
+                    <span className="view-stay-value font-bold">{(s.room_numbers || []).join(', ') || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Number of Rooms</span>
+                    <span className="view-stay-value tabular-nums">{s.number_of_rooms || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Number of Guests</span>
+                    <span className="view-stay-value tabular-nums">{s.number_of_guests || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Stay Type</span>
+                    <span className="view-stay-value">
+                      {s.stay_type === 'HOURLY'
+                        ? `Hourly (${s.hours || 0} Hour${s.hours === 1 ? '' : 's'})`
+                        : `Nightly (${s.nights || Math.max(1, Math.round((new Date(s.current_checkout_at) - new Date(s.checkin_at)) / 864e5))} Night${(s.nights || 1) === 1 ? '' : 's'})`}
+                    </span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Check-in Time</span>
+                    <span className="view-stay-value tabular-nums">{L.fmtIST(s.checkin_at)}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Original Checkout</span>
+                    <span className="view-stay-value tabular-nums">{L.fmtIST(s.original_checkout_at)}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Current Checkout</span>
+                    <span className="view-stay-value tabular-nums">{L.fmtIST(s.current_checkout_at)}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Actual Checkout</span>
+                    <span className="view-stay-value tabular-nums">
+                      {s.status === 'CHECKED_OUT' || s.actual_checkout_at
+                        ? `${L.fmtIST(s.actual_checkout_at || s.current_checkout_at)}${s.checkout_type ? ` (${s.checkout_type})` : ''}`
+                        : '-'}
+                    </span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Extension Count</span>
+                    <span className="view-stay-value tabular-nums">{s.extension_count || 0}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* c) Payment Summary */}
+              <div className="view-stay-card">
+                <div className="view-stay-card-header">
+                  <IconCreditCard /> Payment Summary
+                </div>
+                <div className="view-stay-boxes">
+                  <div className="view-stay-stat-box">
+                    <small>TOTAL AMOUNT</small>
+                    <b className="tabular-nums">{inr(s.total_amount)}</b>
+                  </div>
+                  <div className="view-stay-stat-box">
+                    <small>TOTAL PAID</small>
+                    <b className="tabular-nums ok">{inr(s.total_paid)}</b>
+                  </div>
+                  <div className={`view-stay-stat-box ${Number(s.balance) > 0 ? 'stat-box-danger' : ''}`}>
+                    <small>BALANCE</small>
+                    <b className={`tabular-nums ${Number(s.balance) > 0 ? 'due' : 'ok'}`}>{inr(s.balance)}</b>
+                  </div>
+                  <div className="view-stay-stat-box">
+                    <small>STATUS</small>
+                    <b className={s.payment_status === 'PAID' ? 'ok' : 'due'}>
+                      {s.payment_status || (s.balance > 0 ? 'PENDING' : 'PAID')}
+                    </b>
+                  </div>
+                </div>
+
+                <div className="view-stay-rows" style={{ marginTop: 12 }}>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Payment Mode Summary</span>
+                    <span className="view-stay-value">{s.payment_mode_summary || '-'}</span>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12, fontSize: 11, fontWeight: 700, color: 'var(--navy-700)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Totals by Payment Mode
+                </div>
+                <div className="view-stay-boxes" style={{ marginTop: 6 }}>
+                  <div className="view-stay-stat-box">
+                    <small>CASH</small>
+                    <b className="tabular-nums">{inr(byMode.CASH)}</b>
+                  </div>
+                  <div className="view-stay-stat-box">
+                    <small>GPAY</small>
+                    <b className="tabular-nums">{inr(byMode.GPAY)}</b>
+                  </div>
+                  <div className="view-stay-stat-box">
+                    <small>CARD</small>
+                    <b className="tabular-nums">{inr(byMode.CARD)}</b>
+                  </div>
+                  <div className="view-stay-stat-box">
+                    <small>ONLINE</small>
+                    <b className="tabular-nums">{inr(byMode.ONLINE)}</b>
+                  </div>
+                </div>
+              </div>
+
+              {/* d) Payment History Table */}
+              <div className="view-stay-card">
+                <div className="view-stay-card-header">
+                  <IconClock /> Payment History ({payments.length})
+                </div>
+                {payments.length === 0 ? (
+                  <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--status-neutral)', fontSize: 13 }}>
+                    No payment records found
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                    <table className="mini-table">
+                      <thead>
+                        <tr>
+                          <th>Date/Time (IST)</th>
+                          <th>Type</th>
+                          <th>Mode</th>
+                          <th>Amount</th>
+                          <th>Reference No</th>
+                          <th>Note</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payments.map((p, i) => (
+                          <tr key={p.id || i}>
+                            <td className="tabular-nums">{L.fmtIST(p.created_at)}</td>
+                            <td>
+                              <span className={`pill ${p.kind === 'REFUND' ? 'badge-danger' : 'badge-neutral'}`}>
+                                {paymentKindLabels[p.kind] || p.kind || 'Payment'}
+                              </span>
+                            </td>
+                            <td><span className="pill badge-gold">{p.mode}</span></td>
+                            <td className={`tabular-nums ${p.kind === 'REFUND' ? 'due' : 'ok'}`} style={{ fontWeight: 600 }}>
+                              {p.kind === 'REFUND' ? `-${inr(p.amount)}` : inr(p.amount)}
+                            </td>
+                            <td className="tabular-nums">{p.reference_no || '-'}</td>
+                            <td>{p.note || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* e) Extension History Table (if seq > 1 exists) */}
+              {hasExtensions && (
+                <div className="view-stay-card">
+                  <div className="view-stay-card-header">
+                    <IconCalendar /> Extension History
+                  </div>
+                  <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                    <table className="mini-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>From</th>
+                          <th>To</th>
+                          <th>Source</th>
+                          <th>Booking ID</th>
+                          <th>Rooms</th>
+                          <th>Guests</th>
+                          <th>Amount</th>
+                          <th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {segments.map((g, i) => (
+                          <tr key={g.id || g.seq || i} style={g.seq === 1 ? { background: 'var(--cream-100, #faf8f5)' } : {}}>
+                            <td style={{ fontWeight: 600 }}>
+                              {g.seq === 1 ? 'Original booking' : `Ext #${g.seq - 1}`}
+                            </td>
+                            <td className="tabular-nums">{L.fmtIST(g.from_at)}</td>
+                            <td className="tabular-nums">{L.fmtIST(g.to_at)}</td>
+                            <td>{g.booking_source || '-'}</td>
+                            <td className="tabular-nums">{g.booking_id || '-'}</td>
+                            <td>{(g.room_numbers || []).join(', ') || g.number_of_rooms || '-'}</td>
+                            <td className="tabular-nums">{g.number_of_guests || '-'}</td>
+                            <td className="tabular-nums ok" style={{ fontWeight: 600 }}>{inr(g.amount)}</td>
+                            <td>{g.reason || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* f) Record Info */}
+              <div className="view-stay-card">
+                <div className="view-stay-card-header">
+                  <IconFileText /> Record Information
+                </div>
+                <div className="view-stay-rows">
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Created At</span>
+                    <span className="view-stay-value tabular-nums">{L.fmtIST(s.created_at)}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Created By (Receptionist)</span>
+                    <span className="view-stay-value font-bold">{s.receptionist_name || '-'}</span>
+                  </div>
+                  <div className="view-stay-row">
+                    <span className="view-stay-label">Last Updated</span>
+                    <span className="view-stay-value tabular-nums">
+                      {L.fmtIST(s.updated_at || s.last_updated_at || s.created_at)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        {s && (
+          <div className="drawer-footer">
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => L.printGRC(s.id).catch(toast)}
+            >
+              <IconPrinter /> Print GRC
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => setSubEditRoomsStay(s)}
+            >
+              <IconBed /> Change room
+            </button>
+            {(s.status === 'ACTIVE' || Number(s.balance) > 0) && (
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setSubAct({ s, type: 'extend' })}
+              >
+                <IconCalendar /> Extend
+              </button>
+            )}
+            {Number(s.balance) > 0 && (
+              <button
+                type="button"
+                className="btn-gold"
+                onClick={() => setSubAct({ s, type: 'balance' })}
+              >
+                <IconCreditCard /> Pay balance
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Sub-modals inside ViewStay */}
+      {subAct && (
+        <Action
+          {...subAct}
+          onClose={ok => {
+            setSubAct(null)
+            if (ok) {
+              load()
+              onChanged && onChanged()
+            }
+          }}
+        />
+      )}
+
+      {subEditRoomsStay && (
+        <EditRooms
+          s={subEditRoomsStay}
+          hotelId={s?.hotel_id || subEditRoomsStay.hotel_id}
+          onClose={ok => {
+            setSubEditRoomsStay(null)
+            if (ok) {
+              load()
+              onChanged && onChanged()
+            }
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
 // HOME SCREEN (Active Guests, Counters & Actions)
 // ---------------------------------------------------------------------
 function Home({ hotelId }) {
   const [rows, setRows] = useState([])
   const [act, setAct] = useState(null)
   const [editRoomsStay, setEditRoomsStay] = useState(null)
+  const [viewStayId, setViewStayId] = useState(null)
 
   useEffect(() => L.watchActive(hotelId, setRows), [hotelId])
 
@@ -1135,8 +1677,15 @@ function Home({ hotelId }) {
                     </div>
                   </td>
                   <td>
-                    <div style={{ fontWeight: 600, color: 'var(--navy-800)' }}>{s.guest_name}</div>
-                    <small style={{ color: 'var(--status-neutral)', letterSpacing: '0.04em' }}>{s.grc_number}</small>
+                    <button
+                      type="button"
+                      className="guest-name-link"
+                      title="Click to view stay details"
+                      onClick={() => setViewStayId(s.id)}
+                    >
+                      {s.guest_name}
+                    </button>
+                    <small style={{ color: 'var(--status-neutral)', letterSpacing: '0.04em', display: 'block' }}>{s.grc_number}</small>
                     {s.status === 'CHECKED_OUT' && (
                       <small style={{ color: 'var(--status-due, #b3261e)', display: 'block', fontWeight: 600, marginTop: 2 }}>
                         Checked out - balance due
@@ -1161,24 +1710,18 @@ function Home({ hotelId }) {
                     <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
                       <button
                         className="btn-ghost btn-sm"
+                        title="View stay details"
+                        aria-label={`View stay details for ${s.guest_name}`}
+                        onClick={() => setViewStayId(s.id)}
+                      >
+                        <IconEye /> View
+                      </button>
+                      <button
+                        className="btn-ghost btn-sm"
                         title="Print Guest Registration Card"
                         onClick={() => L.printGRC(s.id).catch(toast)}
                       >
                         <IconPrinter /> Print
-                      </button>
-                      <button
-                        className="btn-ghost btn-sm"
-                        title="Change Room"
-                        onClick={() => setEditRoomsStay(s)}
-                      >
-                        <IconBed /> Change room
-                      </button>
-                      <button
-                        className="btn-ghost btn-sm"
-                        title="Extend Stay Duration"
-                        onClick={() => setAct({ s, type: 'extend' })}
-                      >
-                        <IconCalendar /> Extend
                       </button>
                       {isDue && (
                         <button
@@ -1198,6 +1741,12 @@ function Home({ hotelId }) {
                           <IconLogOut /> Check out
                         </button>
                       )}
+                      <RowMoreMenu
+                        items={[
+                          { label: 'Change room', icon: <IconBed />, onClick: () => setEditRoomsStay(s) },
+                          { label: 'Extend stay', icon: <IconCalendar />, onClick: () => setAct({ s, type: 'extend' }) }
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -1240,6 +1789,14 @@ function Home({ hotelId }) {
           }}
         />
       )}
+
+      {viewStayId && (
+        <ViewStay
+          stayId={viewStayId}
+          onClose={() => setViewStayId(null)}
+          onChanged={() => L.getActiveStays(hotelId).then(setRows)}
+        />
+      )}
     </div>
   )
 }
@@ -1253,6 +1810,7 @@ function Report({ hotelId }) {
   const [rows, setRows] = useState([])
   const [act, setAct] = useState(null)
   const [editRoomsStay, setEditRoomsStay] = useState(null)
+  const [viewStayId, setViewStayId] = useState(null)
   const [sources, setSources] = useState([])
 
   const day = d => new Date(d + 'T00:00:00+05:30')
@@ -1405,8 +1963,15 @@ function Report({ hotelId }) {
                   <span className="badge badge-navy tabular-nums">{s.grc_number}</span>
                 </td>
                 <td>
-                  <div style={{ fontWeight: 600, color: 'var(--navy-800)' }}>{s.guest_name}</div>
-                  <small style={{ color: 'var(--status-neutral)' }} className="tabular-nums">{s.mobile}</small>
+                  <button
+                    type="button"
+                    className="guest-name-link"
+                    title="Click to view stay details"
+                    onClick={() => setViewStayId(s.id)}
+                  >
+                    {s.guest_name}
+                  </button>
+                  <small style={{ color: 'var(--status-neutral)', display: 'block' }} className="tabular-nums">{s.mobile}</small>
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -1431,17 +1996,18 @@ function Report({ hotelId }) {
                   <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
                     <button
                       className="btn-ghost btn-sm"
+                      title="View stay details"
+                      aria-label={`View stay details for ${s.guest_name}`}
+                      onClick={() => setViewStayId(s.id)}
+                    >
+                      <IconEye /> View
+                    </button>
+                    <button
+                      className="btn-ghost btn-sm"
                       title="Reprint GRC"
                       onClick={() => L.printGRC(s.id).catch(toast)}
                     >
                       <IconPrinter /> Print GRC
-                    </button>
-                    <button
-                      className="btn-ghost btn-sm"
-                      title="Change Room Allocation"
-                      onClick={() => setEditRoomsStay(s)}
-                    >
-                      <IconBed /> Change room
                     </button>
                     {s.balance > 0 && (
                       <button
@@ -1452,6 +2018,11 @@ function Report({ hotelId }) {
                         <IconCreditCard /> Pay
                       </button>
                     )}
+                    <RowMoreMenu
+                      items={[
+                        { label: 'Change room', icon: <IconBed />, onClick: () => setEditRoomsStay(s) }
+                      ]}
+                    />
                   </div>
                 </td>
               </tr>
@@ -1517,6 +2088,14 @@ function Report({ hotelId }) {
             setEditRoomsStay(null)
             ok && load()
           }}
+        />
+      )}
+
+      {viewStayId && (
+        <ViewStay
+          stayId={viewStayId}
+          onClose={() => setViewStayId(null)}
+          onChanged={load}
         />
       )}
     </div>

@@ -100,6 +100,8 @@ export const updateGuest = (stayId, p) => supabase.rpc('update_guest_details', {
 export const changeRooms = (stayId, rooms) =>
   supabase.rpc('change_stay_rooms', { p_stay: stayId, p_rooms: rooms }).then(unwrap)
 
+export const getGrc = (stayId) => supabase.rpc('get_grc', { p_stay: stayId }).then(unwrap)
+
 // Report with filters + pagination.  filters: {hotel, from, to, status, source, paymentMode, paymentStatus, extended, search}
 export const getReport = (f = {}, page = 0, pageSize = 50) =>
   supabase.rpc('report_stays', {
