@@ -641,8 +641,8 @@ function CheckIn({ hotelId, onDone }) {
                 <span className="label-sub">Click room tiles or checkboxes to allocate to this stay</span>
               </label>
               {sortedTypes.map(type => (
-                <div key={type} style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--navy-700)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                <div key={type} className="room-type-section">
+                  <div className="room-type-title">
                     {type}
                   </div>
                   <div className="rooms-grid">
@@ -657,7 +657,7 @@ function CheckIn({ hotelId, onDone }) {
                             setSel(s => (s.includes(r.room_number) ? s.filter(x => x !== r.room_number) : [...s, r.room_number]))
                           }
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, width: '100%' }}>
+                          <div className="room-tile-top">
                             <input
                               type="checkbox"
                               checked={isChecked}
@@ -665,28 +665,15 @@ function CheckIn({ hotelId, onDone }) {
                                 setSel(s => (s.includes(r.room_number) ? s.filter(x => x !== r.room_number) : [...s, r.room_number]))
                               }
                               onClick={e => e.stopPropagation()}
-                              style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 15, height: 15, margin: 0 }}
+                              style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 16, height: 16, margin: 0 }}
                             />
                             <span className="room-tile-number">{r.room_number}</span>
                           </div>
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              background: 'var(--status-neutral-bg, #f3f4f6)',
-                              color: 'var(--status-neutral, #6b7280)',
-                              border: '1px solid var(--status-neutral-border, #e5e7eb)',
-                              borderRadius: 4,
-                              fontSize: 10.5,
-                              padding: '2px 8px',
-                              marginTop: 6,
-                              fontWeight: 500,
-                              whiteSpace: 'nowrap'
-                            }}
-                          >
+                          <span className={`room-guest-tag ${guestCount > 0 ? 'has-guests' : ''}`}>
                             {guestCount} guest(s) in
                           </span>
                           {isChecked && (
-                            <span className="room-tile-check" style={{ marginTop: 4 }}>
+                            <span className="room-tile-check">
                               <IconCheck /> Allocated
                             </span>
                           )}
@@ -995,8 +982,8 @@ function EditRooms({ s, hotelId, onClose }) {
             </div>
           ) : (
             sortedTypes.map(type => (
-              <div key={type} style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--navy-700)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+              <div key={type} className="room-type-section" style={{ marginTop: 12 }}>
+                <div className="room-type-title">
                   {type}
                 </div>
                 <div className="rooms-grid">
@@ -1006,12 +993,12 @@ function EditRooms({ s, hotelId, onClose }) {
                       <div
                         key={r.room_number}
                         className={`room-tile ${isChecked ? 'selected' : ''}`}
-                        style={{ minHeight: 60, padding: '8px 10px' }}
+                        style={{ minHeight: 64, padding: '10px 8px' }}
                         onClick={() =>
                           setSel(prev => (prev.includes(r.room_number) ? prev.filter(x => x !== r.room_number) : [...prev, r.room_number]))
                         }
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, width: '100%' }}>
+                        <div className="room-tile-top">
                           <input
                             type="checkbox"
                             checked={isChecked}
@@ -1019,12 +1006,12 @@ function EditRooms({ s, hotelId, onClose }) {
                               setSel(prev => (prev.includes(r.room_number) ? prev.filter(x => x !== r.room_number) : [...prev, r.room_number]))
                             }
                             onClick={e => e.stopPropagation()}
-                            style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 15, height: 15, margin: 0 }}
+                            style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 16, height: 16, margin: 0 }}
                           />
                           <span className="room-tile-number">{r.room_number}</span>
                         </div>
                         {isChecked && (
-                          <span className="room-tile-check" style={{ marginTop: 4 }}>
+                          <span className="room-tile-check">
                             <IconCheck /> Allocated
                           </span>
                         )}
