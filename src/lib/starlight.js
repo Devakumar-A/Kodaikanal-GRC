@@ -2,6 +2,7 @@
 //  STARLIGHT HOTELS - CLIENT INTEGRATION (supabase-js v2)
 //  Works with starlight_schema.sql
 // =====================================================================
+import logoImg from '../assets/logo.png'
 import { createClient } from '@supabase/supabase-js'
 
 export const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
@@ -96,6 +97,9 @@ export const checkoutStay = (stayId, allowBalance = false) =>
 
 export const updateGuest = (stayId, p) => supabase.rpc('update_guest_details', { p_stay: stayId, p }).then(unwrap)
 
+export const changeRooms = (stayId, rooms) =>
+  supabase.rpc('change_stay_rooms', { p_stay: stayId, p_rooms: rooms }).then(unwrap)
+
 // Report with filters + pagination.  filters: {hotel, from, to, status, source, paymentMode, paymentStatus, extended, search}
 export const getReport = (f = {}, page = 0, pageSize = 50) =>
   supabase.rpc('report_stays', {
@@ -173,7 +177,7 @@ export async function printGRC(stayId) {
   .foot{position:absolute;left:24px;right:24px;bottom:12px;border-top:1px solid #b8893a;text-align:center;color:#888;font-size:9px;padding-top:5px}
 </style></head><body><div class="page">
   <div class="top">
-    ${h.logo_url ? `<img class="logo" src="${esc(h.logo_url)}">` : '<div class="logo"></div>'}
+    <img class="logo" src="${esc(new URL(logoImg, window.location.href).href)}">
     <div class="title"><h1>${esc(h.name.toUpperCase())}</h1><small>${esc(h.code)}</small></div>
     <div class="grc"><small>GRC NUMBER</small><b>${esc(s.grc_number)}</b></div>
   </div>
@@ -210,7 +214,7 @@ export async function printGRC(stayId) {
   <div class="sec" style="margin-top:10px"><div class="h">TERMS &amp; CONDITIONS</div>
     <ul class="terms">${(h.terms || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>
 
-  <div class="sign"><div>Guest Signature</div><div>Front Desk Signature</div></div>
+  <div class="sign"><div>Guest Signature</div><div>Front Desk Signature${s.receptionist_name ? `<br><small style="font-weight:normal">(${esc(s.receptionist_name)})</small>` : ''}</div></div>
   <div class="foot">${esc(h.name)} • ${esc(h.code)} &nbsp;|&nbsp; Guest Registration Card &nbsp;|&nbsp; ${esc(s.grc_number)}</div>
 </div></body></html>`
 
@@ -219,8 +223,9 @@ export async function printGRC(stayId) {
   f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
   document.body.appendChild(f)
   f.contentDocument.open(); f.contentDocument.write(html); f.contentDocument.close()
-  f.onload = () => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000) }
-  setTimeout(() => { try { f.contentWindow.focus(); f.contentWindow.print() } catch {} }, 600)
+  await Promise.all([...f.contentDocument.images].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r })))
+  f.contentWindow.focus(); f.contentWindow.print()
+  setTimeout(() => f.remove(), 2000)
 }
 
 // ---------------------------------------------------------------------

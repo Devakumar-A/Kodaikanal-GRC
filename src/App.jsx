@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as L from './lib/starlight'
+import logo from './assets/logo.png'
 
 const inr = n => '₹' + Number(n || 0).toLocaleString('en-IN')
 const MODES = ['CASH', 'GPAY', 'CARD', 'ONLINE']
@@ -339,9 +340,7 @@ function Login() {
     <div className="login-split">
       <div className="login-hero">
         <div className="login-hero-header">
-          <div className="brand-emblem">
-            <IconStar />
-          </div>
+          <img src={logo} alt="Starlight" className="brand-logo" style={{ height: 44, width: 'auto' }} />
           <div>
             <h3 style={{ margin: 0, color: '#ffffff', letterSpacing: '0.05em' }}>STARLIGHT HOTELS</h3>
             <span style={{ fontSize: 11, letterSpacing: '0.12em', color: 'var(--gold-300)', textTransform: 'uppercase', fontWeight: 600 }}>
@@ -370,9 +369,7 @@ function Login() {
       <div className="login-form-pane">
         <div className="login-card">
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
-            <div className="brand-emblem" style={{ margin: '0 auto 12px', width: 48, height: 48 }}>
-              <IconStar />
-            </div>
+            <img src={logo} alt="Starlight" style={{ height: 70, display: 'block', margin: '0 auto 10px' }} />
             <h2 className="font-serif">Front Desk Sign In</h2>
             <div className="login-card-sub">Please enter your staff credentials to continue</div>
           </div>
@@ -444,7 +441,8 @@ function CheckIn({ hotelId, onDone }) {
     stay_type: 'NIGHTLY',
     nights: 1,
     hours: 3,
-    total: ''
+    total: '',
+    receptionist_name: localStorage.getItem('rname') || ''
   })
   const [sel, setSel] = useState([])
   const [pay, setPay] = useState(blankPay)
@@ -485,6 +483,8 @@ function CheckIn({ hotelId, onDone }) {
   })
 
   const submit = async () => {
+    if (!f.receptionist_name.trim()) return toast('Enter receptionist name')
+    localStorage.setItem('rname', f.receptionist_name.trim())
     const r = L.computePayment({ mode: pay.mode, total: f.total, paid: pay.paid, split: pay.split })
     if (r.error) return toast(r.error)
     setBusy(true)
@@ -710,6 +710,17 @@ function CheckIn({ hotelId, onDone }) {
               <input type="number" min="0" placeholder="e.g. 3500" value={f.total} onChange={set('total')} />
             </label>
 
+            <div className="card" style={{ marginBottom: 14 }}>
+              <label>
+                <span>Receptionist Name *</span>
+                <input
+                  placeholder="e.g. Anand"
+                  value={f.receptionist_name}
+                  onChange={set('receptionist_name')}
+                />
+              </label>
+            </div>
+
             <Pay total={+f.total || 0} pay={pay} setPay={setPay} />
           </div>
         </div>
@@ -724,6 +735,10 @@ function CheckIn({ hotelId, onDone }) {
           <div className="summary-row">
             <span>Guest Name</span>
             <b>{f.guest_name || '—'}</b>
+          </div>
+          <div className="summary-row">
+            <span>Receptionist</span>
+            <b>{f.receptionist_name || '—'}</b>
           </div>
           <div className="summary-row">
             <span>Rooms Allocated</span>
@@ -772,7 +787,7 @@ function CheckIn({ hotelId, onDone }) {
           <button
             className="btn-gold"
             style={{ width: '100%', marginTop: 20, height: 44, fontSize: 14 }}
-            disabled={busy || !f.guest_name || !f.mobile || !sel.length}
+            disabled={busy || !f.guest_name || !f.mobile || !sel.length || !f.receptionist_name?.trim()}
             onClick={submit}
           >
             <IconPrinter />
@@ -895,11 +910,153 @@ function Action({ s, type, onClose }) {
 }
 
 // ---------------------------------------------------------------------
+// EDIT ROOMS MODAL (Change Room)
+// ---------------------------------------------------------------------
+function EditRooms({ s, hotelId, onClose }) {
+  const [rooms, setRooms] = useState([])
+  const [sel, setSel] = useState(s.room_numbers || [])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    L.getRooms(hotelId).then(setRooms).catch(toast)
+  }, [hotelId])
+
+  const roomTypeOrder = ['1 BHK', 'DELUXE ROOM', '2 BHK', '3 BHK', '5 BHK']
+  const groupedRooms = rooms.reduce((acc, r) => {
+    const type = r.room_type || 'Other'
+    if (!acc[type]) acc[type] = []
+    acc[type].push(r)
+    return acc
+  }, {})
+
+  Object.keys(groupedRooms).forEach(type => {
+    groupedRooms[type].sort((a, b) =>
+      String(a.room_number || '').localeCompare(String(b.room_number || ''), undefined, { numeric: true })
+    )
+  })
+
+  const sortedTypes = Object.keys(groupedRooms).sort((a, b) => {
+    const aNorm = a.trim().toUpperCase()
+    const bNorm = b.trim().toUpperCase()
+    const idxA = roomTypeOrder.findIndex(t => t.toUpperCase() === aNorm)
+    const idxB = roomTypeOrder.findIndex(t => t.toUpperCase() === bNorm)
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB
+    if (idxA !== -1) return -1
+    if (idxB !== -1) return 1
+    return a.localeCompare(b)
+  })
+
+  const save = async () => {
+    if (!sel.length) return toast('Please select at least one room')
+    setBusy(true)
+    try {
+      await L.changeRooms(s.id, sel)
+      onClose(true)
+      if (confirm('Room updated. Print the updated GRC now?')) {
+        await L.printGRC(s.id).catch(toast)
+      }
+    } catch (e) {
+      toast(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal" role="dialog" aria-modal="true">
+      <div className="card">
+        <div className="modal-header">
+          <div>
+            <h3>Change room - {s.guest_name}</h3>
+            <p>
+              GRC: <b>{s.grc_number}</b> &bull; Current room: <b>{s.room_numbers ? s.room_numbers.join(', ') : 'None'}</b>
+            </p>
+          </div>
+          <button
+            className="btn-ghost"
+            style={{ minHeight: 'auto', padding: '4px 8px', border: 'none' }}
+            onClick={() => onClose(false)}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ marginBottom: 6 }}>
+            <span>Select New Room(s) *</span>
+            <span className="label-sub">Choose one or more rooms to allocate to this stay</span>
+          </label>
+        </div>
+
+        <div style={{ maxHeight: '50vh', overflowY: 'auto', paddingRight: 4, margin: '8px 0 16px' }}>
+          {rooms.length === 0 ? (
+            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--status-neutral)' }}>
+              Loading rooms...
+            </div>
+          ) : (
+            sortedTypes.map(type => (
+              <div key={type} style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--navy-700)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  {type}
+                </div>
+                <div className="rooms-grid">
+                  {groupedRooms[type].map(r => {
+                    const isChecked = sel.includes(r.room_number)
+                    return (
+                      <div
+                        key={r.room_number}
+                        className={`room-tile ${isChecked ? 'selected' : ''}`}
+                        style={{ minHeight: 60, padding: '8px 10px' }}
+                        onClick={() =>
+                          setSel(prev => (prev.includes(r.room_number) ? prev.filter(x => x !== r.room_number) : [...prev, r.room_number]))
+                        }
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, width: '100%' }}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() =>
+                              setSel(prev => (prev.includes(r.room_number) ? prev.filter(x => x !== r.room_number) : [...prev, r.room_number]))
+                            }
+                            onClick={e => e.stopPropagation()}
+                            style={{ cursor: 'pointer', accentColor: 'var(--gold-600)', flexShrink: 0, width: 15, height: 15, margin: 0 }}
+                          />
+                          <span className="room-tile-number">{r.room_number}</span>
+                        </div>
+                        {isChecked && (
+                          <span className="room-tile-check" style={{ marginTop: 4 }}>
+                            <IconCheck /> Allocated
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={() => onClose(false)} disabled={busy}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={save} disabled={busy || !sel.length}>
+            {busy ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
 // HOME SCREEN (Active Guests, Counters & Actions)
 // ---------------------------------------------------------------------
 function Home({ hotelId }) {
   const [rows, setRows] = useState([])
   const [act, setAct] = useState(null)
+  const [editRoomsStay, setEditRoomsStay] = useState(null)
 
   useEffect(() => L.watchActive(hotelId, setRows), [hotelId])
 
@@ -1024,6 +1181,13 @@ function Home({ hotelId }) {
                       </button>
                       <button
                         className="btn-ghost btn-sm"
+                        title="Change Room"
+                        onClick={() => setEditRoomsStay(s)}
+                      >
+                        <IconBed /> Change room
+                      </button>
+                      <button
+                        className="btn-ghost btn-sm"
                         title="Extend Stay Duration"
                         onClick={() => setAct({ s, type: 'extend' })}
                       >
@@ -1078,6 +1242,17 @@ function Home({ hotelId }) {
           }}
         />
       )}
+
+      {editRoomsStay && (
+        <EditRooms
+          s={editRoomsStay}
+          hotelId={hotelId}
+          onClose={ok => {
+            setEditRoomsStay(null)
+            ok && L.getActiveStays(hotelId).then(setRows)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -1090,6 +1265,7 @@ function Report({ hotelId }) {
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState([])
   const [act, setAct] = useState(null)
+  const [editRoomsStay, setEditRoomsStay] = useState(null)
   const [sources, setSources] = useState([])
 
   const day = d => new Date(d + 'T00:00:00+05:30')
@@ -1273,6 +1449,13 @@ function Report({ hotelId }) {
                     >
                       <IconPrinter /> Print GRC
                     </button>
+                    <button
+                      className="btn-ghost btn-sm"
+                      title="Change Room Allocation"
+                      onClick={() => setEditRoomsStay(s)}
+                    >
+                      <IconBed /> Change room
+                    </button>
                     {s.balance > 0 && (
                       <button
                         className="btn-gold btn-sm"
@@ -1334,6 +1517,17 @@ function Report({ hotelId }) {
           {...act}
           onClose={ok => {
             setAct(null)
+            ok && load()
+          }}
+        />
+      )}
+
+      {editRoomsStay && (
+        <EditRooms
+          s={editRoomsStay}
+          hotelId={hotelId}
+          onClose={ok => {
+            setEditRoomsStay(null)
             ok && load()
           }}
         />
@@ -1505,9 +1699,7 @@ export default function App() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--cream-300)' }}>
         <div style={{ textAlign: 'center' }}>
-          <div className="brand-emblem" style={{ width: 56, height: 56, margin: '0 auto 16px' }}>
-            <IconStar />
-          </div>
+          <img src={logo} alt="Starlight" style={{ height: 60, display: 'block', margin: '0 auto 16px' }} />
           <h3 className="font-serif" style={{ margin: 0, color: 'var(--navy-700)' }}>Starlight Hotels</h3>
           <p style={{ color: 'var(--status-neutral)', fontSize: 13, marginTop: 4 }}>Loading Front Desk Session...</p>
         </div>
@@ -1554,9 +1746,7 @@ export default function App() {
         {/* Left Sidebar (Desktop) */}
         <aside className="sidebar">
           <div className="sidebar-brand">
-            <div className="brand-emblem">
-              <IconStar />
-            </div>
+            <img src={logo} alt="Starlight" className="brand-logo" />
             <div className="brand-info">
               <h1 className="brand-title">STARLIGHT</h1>
               <div className="brand-sub">

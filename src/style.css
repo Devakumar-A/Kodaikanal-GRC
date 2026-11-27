@@ -139,6 +139,14 @@ p {
   gap: 12px;
 }
 
+.brand-logo {
+  height: 36px;
+  background: #fff;
+  border-radius: 6px;
+  padding: 3px;
+  object-fit: contain;
+}
+
 .brand-emblem {
   width: 42px;
   height: 42px;
