@@ -1578,6 +1578,7 @@ function CheckIn({ hotelId, onDone }) {
 // ---------------------------------------------------------------------
 function Action({ s, type, onClose }) {
   const [pay, setPay] = useState(blankPay)
+  const [receptionist, setReceptionist] = useState(localStorage.getItem('rname') || '')
   const [x, setX] = useState({
     amount: '',
     reason: '',
@@ -1593,6 +1594,9 @@ function Action({ s, type, onClose }) {
 
   const validate = () => {
     const errs = {}
+    if (!receptionist || !receptionist.trim()) {
+      errs.receptionist = 'Please enter who received the payment'
+    }
     if (type === 'extend') {
       if (!x.co || new Date(L.fromISTInput(x.co)) <= new Date(s.current_checkout_at)) {
         errs.co = 'New checkout must be after the current checkout'
@@ -1627,6 +1631,8 @@ function Action({ s, type, onClose }) {
     if (Object.keys(errs).length > 0) return
 
     const r = L.computePayment({ mode: pay.mode, total, paid: pay.paid, split: pay.split })
+    const recName = receptionist.trim()
+    localStorage.setItem('rname', recName)
 
     setBusy(true)
     try {
@@ -1637,10 +1643,11 @@ function Action({ s, type, onClose }) {
           booking_source: x.source,
           number_of_rooms: (s.room_numbers || []).length || 1,
           amount: total,
+          receptionist_name: recName,
           payments: r.payments
         })
       } else {
-        await L.addBalancePayment(s.id, r.payments)
+        await L.addBalancePayment(s.id, r.payments, null, recName)
       }
       onClose(true)
     } catch (e) {
@@ -1724,6 +1731,21 @@ function Action({ s, type, onClose }) {
         )}
 
         <Pay total={total} pay={pay} setPay={setPay} error={errors.payment || errors.mode || errors.paid} />
+
+        <div style={{ marginTop: 14, marginBottom: 8 }}>
+          <label>
+            <span>Received by <span className="required-star">*</span></span>
+            <input
+              placeholder="e.g. Anand"
+              className={errors.receptionist ? 'has-error' : ''}
+              value={receptionist}
+              onChange={e => setReceptionist(e.target.value)}
+            />
+            {errors.receptionist && (
+              <div className="field-error-msg"><IconAlertCircle /> {errors.receptionist}</div>
+            )}
+          </label>
+        </div>
 
         <div className="modal-footer">
           <button className="btn-ghost" onClick={() => onClose(false)} disabled={busy}>
@@ -1983,6 +2005,24 @@ function ViewStay({ stayId, onClose, onChanged }) {
   const s = data?.stay
   const segments = data?.segments || []
   const payments = data?.payments || []
+  const rawTransactions = data?.transactions
+
+  // Build fallback transactions from payments if data.transactions is not provided
+  const transactions = rawTransactions && Array.isArray(rawTransactions)
+    ? rawTransactions
+    : payments.length > 0
+      ? [{
+          receipt_no: s?.grc_number || 'RCPT-001',
+          kind: payments[0]?.kind || 'CHECKIN',
+          mode_type: payments.length > 1 ? 'MULTIPLE' : 'SINGLE',
+          mode_summary: payments.map(p => p.mode).filter(Boolean).join(', '),
+          total_amount: payments.reduce((acc, p) => acc + (p.kind === 'REFUND' ? -1 : 1) * Number(p.amount || 0), 0),
+          paid_at: payments[0]?.created_at || s?.created_at,
+          receptionist_name: s?.receptionist_name || '',
+          note: payments[0]?.note || '',
+          lines: payments.map(p => ({ mode: p.mode, amount: p.amount, reference_no: p.reference_no }))
+        }]
+      : []
 
   const byMode = Object.fromEntries(MODES.map(m => [m, 0]))
   payments.forEach(p => {
@@ -2221,47 +2261,91 @@ function ViewStay({ stayId, onClose, onChanged }) {
                 </div>
               </div>
 
-              {/* d) Payment History Table */}
+              {/* d) Receipts & Payment History */}
               <div className="view-stay-card">
                 <div className="view-stay-card-header">
-                  <IconClock /> Payment History ({payments.length})
+                  <IconClock /> Payment Receipts ({transactions.length})
                 </div>
-                {payments.length === 0 ? (
+                {transactions.length === 0 ? (
                   <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--status-neutral)', fontSize: 13 }}>
                     No payment records found
                   </div>
                 ) : (
-                  <div style={{ overflowX: 'auto', marginTop: 8 }}>
-                    <table className="mini-table">
-                      <thead>
-                        <tr>
-                          <th>Date/Time (IST)</th>
-                          <th>Type</th>
-                          <th>Mode</th>
-                          <th>Amount</th>
-                          <th>Reference No</th>
-                          <th>Note</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payments.map((p, i) => (
-                          <tr key={p.id || i}>
-                            <td className="tabular-nums">{L.fmtIST(p.created_at)}</td>
-                            <td>
-                              <span className={`pill ${p.kind === 'REFUND' ? 'badge-danger' : 'badge-neutral'}`}>
-                                {paymentKindLabels[p.kind] || p.kind || 'Payment'}
+                  <div className="receipt-list" style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 10 }}>
+                    {transactions.map((tx, idx) => {
+                      const isMultiple = String(tx.mode_type || '').toUpperCase() === 'MULTIPLE' || (tx.lines && tx.lines.length > 1)
+                      const isRefund = tx.kind === 'REFUND'
+                      const lines = tx.lines || []
+
+                      return (
+                        <div key={tx.receipt_no || idx} className="receipt-card">
+                          <div className="receipt-header">
+                            <div className="receipt-header-left">
+                              <span className="receipt-no">{tx.receipt_no || `RCPT-${idx + 1}`}</span>
+                              <span className={`pill ${isRefund ? 'badge-danger' : 'badge-neutral'}`}>
+                                {paymentKindLabels[tx.kind] || tx.kind || 'Payment'}
                               </span>
-                            </td>
-                            <td><span className="pill badge-gold">{p.mode}</span></td>
-                            <td className={`tabular-nums ${p.kind === 'REFUND' ? 'due' : 'ok'}`} style={{ fontWeight: 600 }}>
-                              {p.kind === 'REFUND' ? `-${inr(p.amount)}` : inr(p.amount)}
-                            </td>
-                            <td className="tabular-nums">{p.reference_no || '-'}</td>
-                            <td>{p.note || '-'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              <span className={`pill ${isMultiple ? 'badge-gold' : 'badge-navy'}`}>
+                                {isMultiple ? 'Multiple' : 'Single'}
+                              </span>
+                            </div>
+                            <div className="receipt-header-right">
+                              <span className="receipt-date tabular-nums">{L.fmtIST(tx.paid_at)}</span>
+                            </div>
+                          </div>
+
+                          <div className="receipt-body">
+                            <div className="receipt-meta-row">
+                              <div className="receipt-meta-item">
+                                <span className="receipt-meta-label">Total:</span>
+                                <b className={`tabular-nums receipt-total-amount ${isRefund ? 'due' : 'ok'}`}>
+                                  {isRefund ? `-${inr(tx.total_amount)}` : inr(tx.total_amount)}
+                                </b>
+                              </div>
+                              <div className="receipt-meta-item">
+                                <span className="receipt-meta-label">Received by:</span>
+                                <span className="receipt-receiver font-bold">{tx.receptionist_name || '—'}</span>
+                              </div>
+                              {tx.note && (
+                                <div className="receipt-meta-item" style={{ flex: '1 1 100%' }}>
+                                  <span className="receipt-meta-label">Note:</span>
+                                  <span className="receipt-note">{tx.note}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {lines.length > 0 && (
+                              <div className="receipt-lines-wrap">
+                                <table className="mini-table receipt-lines-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Payment Mode</th>
+                                      <th>Amount</th>
+                                      <th>Reference No</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {lines.map((ln, lIdx) => (
+                                      <tr key={lIdx}>
+                                        <td>
+                                          <span className="pill badge-gold">{ln.mode}</span>
+                                        </td>
+                                        <td className="tabular-nums font-bold" style={{ color: 'var(--navy-800)' }}>
+                                          {inr(ln.amount)}
+                                        </td>
+                                        <td className="tabular-nums" style={{ color: 'var(--navy-600)' }}>
+                                          {ln.reference_no || '-'}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

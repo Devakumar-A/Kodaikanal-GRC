@@ -140,8 +140,10 @@ export const getActiveStays = (hotelId) =>
 export const extendStay = (stayId, p) => supabase.rpc('extend_stay', { p_stay: stayId, p }).then(unwrap)
 
 // Collect remaining balance later (from Home or Report)
-export const addBalancePayment = (stayId, payments, note = null) =>
-  supabase.rpc('add_payment', { p_stay: stayId, p_payments: payments, p_note: note }).then(unwrap)
+export const addBalancePayment = (stayId, payments, note = null, receptionist = null) => {
+  const recName = receptionist || localStorage.getItem('rname') || null
+  return supabase.rpc('add_payment', { p_stay: stayId, p_payments: payments, p_note: note, p_receptionist: recName }).then(unwrap)
+}
 
 export const checkoutStay = (stayId, allowBalance = false) =>
   supabase.rpc('checkout_stay', { p_stay: stayId, p_allow_balance: allowBalance }).then(unwrap)
