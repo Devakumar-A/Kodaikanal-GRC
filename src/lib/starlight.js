@@ -286,9 +286,9 @@ export async function printGRC(stayId) {
   const row = (k, v) => `<div class="r"><span class="k">${k}</span><span class="v">: ${v}</span></div>`
   const box = (k, v, cls = '') => `<div class="b ${cls}"><small>${k}</small><b>${v}</b></div>`
 
-  const ext = segments.filter(g => g.seq > 1)
+  const ext = (segments || []).filter(g => g.seq > 1)
   const extTable = ext.length ? `
-    <div class="sec"><div class="h">EXTENSION HISTORY</div>
+    <div class="sec ext-sec"><div class="h">EXTENSION HISTORY</div>
       <table><tr><th>#</th><th>From</th><th>To</th><th>Source</th><th>Booking ID</th><th>Amount</th><th>Reason</th></tr>
       ${ext.map(g => `<tr><td>${g.seq - 1}</td><td>${fmtIST(g.from_at)}</td><td>${fmtIST(g.to_at)}</td>
         <td>${esc(g.booking_source || '-')}</td><td>${esc(g.booking_id || '-')}</td><td>${inr(g.amount)}</td><td>${esc(g.reason || '-')}</td></tr>`).join('')}
@@ -296,67 +296,420 @@ export async function printGRC(stayId) {
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.grc_number)}</title>
 <style>
-  @page{size:A4;margin:10mm}
-  *{box-sizing:border-box} body{font-family:Georgia,'Times New Roman',serif;color:#162a4d;margin:0;font-size:12.5px}
-  .page{border:1px solid #162a4d;padding:22px 24px;min-height:275mm;position:relative}
-  .top{border-top:5px solid #b8893a;padding-top:14px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #162a4d;padding-bottom:10px}
-  .logo{width:80px;height:60px;object-fit:contain}
-  .title{text-align:center;flex:1} .title h1{margin:0;font-size:24px;letter-spacing:2px} .title small{color:#b8893a;letter-spacing:3px;font-weight:bold}
-  .grc{border:1px solid #b8893a;border-radius:4px;padding:6px 14px;text-align:center} .grc small{display:block;color:#b8893a;letter-spacing:2px;font-size:9px;font-weight:bold} .grc b{font-size:15px}
-  h2{text-align:center;letter-spacing:3px;margin:14px 0 2px;font-size:20px} .sub{text-align:center;color:#b8893a;letter-spacing:3px;font-size:9px;font-weight:bold;margin-bottom:10px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px} .col>.sec{margin-bottom:10px}
-  .sec{border:1px solid #d9b96b;border-radius:3px;overflow:hidden} .h{background:#162a4d;color:#fff;padding:7px 10px;letter-spacing:2px;font-weight:bold;font-size:12px}
-  .body{padding:4px 10px} .r{display:flex;padding:5px 0;border-bottom:1px dotted #ccc} .k{width:36%;font-weight:bold} .v{flex:1;font-weight:bold}
-  .boxes{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;padding:6px 8px}
-  .b{border:1px solid #d9b96b;border-radius:3px;text-align:center;padding:4px 2px} .b small{display:block;font-size:8px;color:#b8893a;letter-spacing:1px;font-weight:bold} .b b{font-size:13px}
-  .paid{color:#0a7a3d} .due{color:#b3261e}
-  .terms{list-style:square;margin:6px 0;padding:0 14px 6px 28px;line-height:1.7;font-size:11.5px}
-  table{width:100%;border-collapse:collapse;font-size:11px} th,td{border:1px solid #d9b96b;padding:4px 6px;text-align:left} th{background:#f6efdc}
-  .sign{display:flex;justify-content:space-between;margin-top:70px;padding:0 10px} .sign div{width:40%;border-top:2px solid #162a4d;text-align:center;padding-top:5px;font-weight:bold}
-  .foot{position:absolute;left:24px;right:24px;bottom:12px;border-top:1px solid #b8893a;text-align:center;color:#888;font-size:9px;padding-top:5px}
-</style></head><body><div class="page">
-  <div class="top">
-    <img class="logo" src="${esc(new URL(logoImg, window.location.href).href)}">
-    <div class="title"><h1>${esc(h.name.toUpperCase())}</h1><small>${esc(h.code)}</small></div>
-    <div class="grc"><small>GRC NUMBER</small><b>${esc(s.grc_number)}</b></div>
-  </div>
-  <h2>GUEST REGISTRATION CARD</h2><div class="sub">GUEST REGISTRATION &amp; STAY RECORD</div>
-
-  <div class="grid">
-    <div class="col">
-      <div class="sec"><div class="h">GUEST INFORMATION</div><div class="body">
-        ${row('Guest Name', esc(s.guest_name))}${row('Mobile Number', esc(s.mobile))}${row('Guest Address', esc(s.address || '-'))}
-        ${row('ID Proof Details', esc(s.id_proof_type || '-'))}${row('ID Proof Number', esc(s.id_proof_number || '-'))}
-      </div></div>
-      <div class="sec"><div class="h">PAYMENT INFORMATION</div><div class="body">${row('Payment Mode', esc(modeText))}</div>
-        <div class="boxes">${box('CASH', inr(byMode.CASH))}${box('GPAY', inr(byMode.GPAY))}${box('CARD', inr(byMode.CARD))}${box('ONLINE', inr(byMode.ONLINE))}</div>
-        <div class="boxes">${box('TOTAL AMOUNT', inr(s.total_amount))}${box('AMOUNT PAID', inr(s.total_paid))}
-          ${box('BALANCE', inr(s.balance), Number(s.balance) > 0 ? 'due' : '')}${box('STATUS', s.payment_status, s.payment_status === 'PAID' ? 'paid' : 'due')}</div>
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  *, *::before, *::after {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #162a4d;
+    background: #ffffff;
+    font-size: 11.5px;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .outer-wrap {
+    padding: 10mm;
+    width: 210mm;
+    box-sizing: border-box;
+    margin: 0 auto;
+  }
+  .page {
+    border: 1.5px solid #162a4d;
+    padding: 16px 20px 14px;
+    min-height: 277mm;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    position: relative;
+  }
+  .top {
+    flex: 0 0 auto;
+    border-top: 5px solid #b8893a;
+    padding-top: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 2px solid #162a4d;
+    padding-bottom: 8px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .logo {
+    width: 80px;
+    height: 54px;
+    object-fit: contain;
+  }
+  .title {
+    text-align: center;
+    flex: 1;
+    padding: 0 10px;
+  }
+  .title h1 {
+    margin: 0;
+    font-size: 22px;
+    letter-spacing: 2px;
+    color: #162a4d;
+  }
+  .title small {
+    color: #b8893a;
+    letter-spacing: 3px;
+    font-weight: bold;
+    display: block;
+    margin-top: 2px;
+  }
+  .grc {
+    border: 1px solid #b8893a;
+    border-radius: 4px;
+    padding: 5px 12px;
+    text-align: center;
+    background: #faf8f5;
+  }
+  .grc small {
+    display: block;
+    color: #b8893a;
+    letter-spacing: 2px;
+    font-size: 8.5px;
+    font-weight: bold;
+  }
+  .grc b {
+    font-size: 14px;
+    color: #162a4d;
+    font-family: monospace;
+  }
+  h2.main-heading {
+    flex: 0 0 auto;
+    text-align: center;
+    letter-spacing: 3px;
+    margin: 10px 0 2px;
+    font-size: 17px;
+    color: #162a4d;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .sub-heading {
+    flex: 0 0 auto;
+    text-align: center;
+    color: #b8893a;
+    letter-spacing: 3px;
+    font-size: 8.5px;
+    font-weight: bold;
+    margin-bottom: 8px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .grid {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .col > .sec {
+    margin-bottom: 8px;
+  }
+  .sec {
+    border: 1px solid #d9b96b;
+    border-radius: 3px;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    background: #ffffff;
+  }
+  .h {
+    background: #162a4d !important;
+    color: #ffffff !important;
+    padding: 5px 8px;
+    letter-spacing: 1.5px;
+    font-weight: bold;
+    font-size: 11px;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .body {
+    padding: 3px 8px;
+  }
+  .r {
+    display: flex;
+    padding: 4px 0;
+    border-bottom: 1px dotted #dcdcdc;
+    font-size: 11px;
+    align-items: baseline;
+  }
+  .r:last-child {
+    border-bottom: none;
+  }
+  .k {
+    flex: 0 0 44%;
+    width: 44%;
+    font-weight: bold;
+    color: #162a4d;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .v {
+    flex: 0 0 56%;
+    width: 56%;
+    font-weight: bold;
+    color: #162a4d;
+    word-break: break-word;
+    padding-left: 2px;
+  }
+  .boxes {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+    padding: 4px 6px;
+    background: #faf8f5;
+  }
+  .b {
+    border: 1px solid #d9b96b;
+    border-radius: 3px;
+    text-align: center;
+    padding: 3px 2px;
+    background: #ffffff;
+  }
+  .b small {
+    display: block;
+    font-size: 7.5px;
+    color: #b8893a;
+    letter-spacing: 0.5px;
+    font-weight: bold;
+  }
+  .b b {
+    font-size: 11.5px;
+    font-feature-settings: 'tnum';
+    font-variant-numeric: tabular-nums;
+  }
+  .paid {
+    color: #0a7a3d !important;
+  }
+  .due {
+    color: #b3261e !important;
+  }
+  .purpose-sec {
+    flex: 0 0 auto;
+    margin-top: 6px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .ext-sec {
+    flex: 0 0 auto;
+    margin-top: 6px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .terms-sec {
+    flex: 0 0 auto;
+    margin-top: 6px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .terms {
+    list-style: square;
+    margin: 4px 0;
+    padding: 0 12px 4px 22px;
+    line-height: 1.55;
+    font-size: 10.5px;
+    color: #2b3a55;
+  }
+  .terms li {
+    margin-bottom: 2px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+  }
+  th, td {
+    border: 1px solid #d9b96b;
+    padding: 3px 5px;
+    text-align: left;
+  }
+  th {
+    background: #f6efdc !important;
+    font-weight: bold;
+    color: #162a4d;
+  }
+  /* Vertical flexible spacer pushes signature and footer to page bottom */
+  .vertical-spacer {
+    flex: 1 1 auto;
+    min-height: 14px;
+  }
+  /* Signature and Footer block stays together and never splits */
+  .bottom-cluster {
+    flex: 0 0 auto;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-top: auto;
+  }
+  .sign {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 14px;
+    margin-top: 8px;
+  }
+  .sign-col {
+    width: 42%;
+    display: flex;
+    flex-direction: column;
+    text-align: center;
+  }
+  .sign-blank {
+    height: 24mm;
+    min-height: 22mm;
+  }
+  .sign-line {
+    border-top: 1.5px solid #162a4d;
+    padding-top: 4px;
+    font-weight: bold;
+    font-size: 11px;
+    color: #162a4d;
+  }
+  .sign-name {
+    font-weight: normal;
+    font-size: 9.5px;
+    color: #444;
+    margin-top: 1px;
+  }
+  .foot {
+    margin-top: 8mm;
+    border-top: 1px solid #b8893a;
+    text-align: center;
+    color: #666;
+    font-size: 8.5px;
+    padding-top: 4px;
+    letter-spacing: 0.5px;
+  }
+</style>
+</head>
+<body>
+<div class="outer-wrap">
+  <div class="page">
+    <div class="top">
+      <img class="logo" src="${esc(new URL(logoImg, window.location.href).href)}" alt="Logo">
+      <div class="title">
+        <h1>${esc(h.name.toUpperCase())}</h1>
+        <small>${esc(h.code)}</small>
+      </div>
+      <div class="grc">
+        <small>GRC NUMBER</small>
+        <b>${esc(s.grc_number)}</b>
       </div>
     </div>
-    <div class="col">
-      <div class="sec"><div class="h">BOOKING &amp; STAY INFORMATION</div><div class="body">
-        ${row('Booking Source', esc(s.booking_source || '-'))}${row('Booking ID', esc(s.booking_id || '-'))}
-        ${row('Room Number', esc(formatRooms(s.room_numbers)))}${s.room_category ? row('Room Type', esc(s.room_category)) : ''}
-        ${row('Number of Rooms', s.number_of_rooms)}
-        ${row('Number of Guests', s.number_of_guests)}${row(s.stay_type === 'HOURLY' ? 'Stay Duration' : 'Number of Nights', nights)}
-        ${row('Check-in Time', fmtIST(s.checkin_at))}${row('Original Check-out', fmtIST(s.original_checkout_at))}
-        ${row('Current Check-out', fmtIST(s.current_checkout_at))}
-      </div></div>
-      <div class="sec"><div class="h">RECORD INFORMATION</div><div class="body">
-        ${row('Stay Status', esc(s.status.replace('_', ' ')))}${row('Created At', fmtIST(s.created_at))}
-      </div></div>
+
+    <h2 class="main-heading">GUEST REGISTRATION CARD</h2>
+    <div class="sub-heading">GUEST REGISTRATION &amp; STAY RECORD</div>
+
+    <div class="grid">
+      <div class="col">
+        <div class="sec">
+          <div class="h">GUEST INFORMATION</div>
+          <div class="body">
+            ${row('Guest Name', esc(s.guest_name))}
+            ${row('Mobile Number', esc(s.mobile))}
+            ${row('Guest Address', esc(s.address || '-'))}
+            ${row('ID Proof Details', esc(s.id_proof_type || '-'))}
+            ${row('ID Proof Number', esc(s.id_proof_number || '-'))}
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">PAYMENT INFORMATION</div>
+          <div class="body">
+            ${row('Payment Mode', esc(modeText))}
+          </div>
+          <div class="boxes">
+            ${box('CASH', inr(byMode.CASH))}
+            ${box('GPAY', inr(byMode.GPAY))}
+            ${box('CARD', inr(byMode.CARD))}
+            ${box('ONLINE', inr(byMode.ONLINE))}
+          </div>
+          <div class="boxes">
+            ${box('TOTAL AMOUNT', inr(s.total_amount))}
+            ${box('AMOUNT PAID', inr(s.total_paid))}
+            ${box('BALANCE', inr(s.balance), Number(s.balance) > 0 ? 'due' : '')}
+            ${box('STATUS', s.payment_status, s.payment_status === 'PAID' ? 'paid' : 'due')}
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="sec">
+          <div class="h">BOOKING &amp; STAY INFORMATION</div>
+          <div class="body">
+            ${row('Booking Source', esc(s.booking_source || '-'))}
+            ${row('Booking ID', esc(s.booking_id || '-'))}
+            ${row('Room Number', esc(formatRooms(s.room_numbers)))}
+            ${s.room_category ? row('Room Type', esc(s.room_category)) : ''}
+            ${row('Number of Rooms', s.number_of_rooms)}
+            ${row('Number of Guests', s.number_of_guests)}
+            ${row(s.stay_type === 'HOURLY' ? 'Stay Duration' : 'Number of Nights', nights)}
+            ${row('Check-in Time', fmtIST(s.checkin_at))}
+            ${row('Original Check-out', fmtIST(s.original_checkout_at))}
+            ${row('Current Check-out', fmtIST(s.current_checkout_at))}
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">RECORD INFORMATION</div>
+          <div class="body">
+            ${row('Stay Status', esc(s.status.replace('_', ' ')))}
+            ${row('Created At', fmtIST(s.created_at))}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec purpose-sec">
+      <div class="h">PURPOSE OF VISIT</div>
+      <div class="body">
+        <b>${esc(s.purpose_of_visit || '-')}</b>
+      </div>
+    </div>
+
+    ${extTable}
+
+    <div class="sec terms-sec">
+      <div class="h">TERMS &amp; CONDITIONS</div>
+      <ul class="terms">
+        ${(h.terms || []).map(t => `<li>${esc(t)}</li>`).join('')}
+      </ul>
+    </div>
+
+    <div class="vertical-spacer"></div>
+
+    <div class="bottom-cluster">
+      <div class="sign">
+        <div class="sign-col">
+          <div class="sign-blank"></div>
+          <div class="sign-line">Guest Signature</div>
+          <div class="sign-name">(${esc(s.guest_name)})</div>
+        </div>
+        <div class="sign-col">
+          <div class="sign-blank"></div>
+          <div class="sign-line">Front Desk Signature</div>
+          ${s.receptionist_name ? `<div class="sign-name">(${esc(s.receptionist_name)})</div>` : ''}
+        </div>
+      </div>
+
+      <div class="foot">
+        ${esc(h.name)} - ${esc(h.code)} &nbsp;|&nbsp; Guest Registration Card &nbsp;|&nbsp; ${esc(s.grc_number)}
+      </div>
     </div>
   </div>
-
-  <div class="sec" style="margin-top:10px"><div class="h">PURPOSE OF VISIT</div><div class="body"><b>${esc(s.purpose_of_visit || '-')}</b></div></div>
-  ${extTable ? `<div style="margin-top:10px">${extTable}</div>` : ''}
-  <div class="sec" style="margin-top:10px"><div class="h">TERMS &amp; CONDITIONS</div>
-    <ul class="terms">${(h.terms || []).map(t => `<li>${esc(t)}</li>`).join('')}</ul></div>
-
-  <div class="sign"><div>Guest Signature</div><div>Front Desk Signature${s.receptionist_name ? `<br><small style="font-weight:normal">(${esc(s.receptionist_name)})</small>` : ''}</div></div>
-  <div class="foot">${esc(h.name)} • ${esc(h.code)} &nbsp;|&nbsp; Guest Registration Card &nbsp;|&nbsp; ${esc(s.grc_number)}</div>
-</div></body></html>`
+</div>
+</body></html>`
 
   // Print through a hidden iframe (no popup blocker issues)
   const f = document.createElement('iframe')
