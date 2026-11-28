@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import * as L from './lib/starlight'
 import logo from './assets/favicon.png'
 
@@ -507,20 +508,23 @@ function Dropdown({
 }
 
 // ---------------------------------------------------------------------
-// REUSABLE ROOM PICKER (Multiple rooms / cottages per guest)
-// 1. Room Category * dropdown (Deluxe Room | 1 BHK | 2 BHK | 3 BHK | 5 BHK). Changing clears selection.
+// REUSABLE ROOM PICKER (Multiple rooms / villas per guest across categories)
+// 1. Room Category * dropdown (Deluxe Room | 1 BHK | 2 BHK | 3 BHK | 5 BHK).
+//    Changing it only controls which list is shown below. It does NOT clear sel.
 // 2. Deluxe Room: "Cottage *" searchable single-select -> "Room(s) *" multi-select with checkboxes.
-//    Selected rooms persist when another cottage is chosen (cross-cottage booking).
-// 3. BHK categories: "Cottage(s) *" searchable multi-select with checkboxes.
-// 4. Removable chips (x) + one summary line below.
-// 5. In-use occupancy hints as grey tags (non-blocking).
+//    Selections from different cottages are kept together.
+// 3. 1 BHK / 2 BHK / 3 BHK / 5 BHK: "Villa(s) *" searchable MULTI-select dropdown with checkboxes.
+//    Ticking adds villa label to sel, unticking removes it. Panel stays open while ticking.
+// 4. Removable chips with category pill (navy for BHK, gold for Deluxe) + "Clear all" link.
+// 5. One summary line grouped by category, e.g. "2 BHK: Harsha Cottage, MS Cottage | 3 BHK: Sai Cottage | Deluxe: Yellow (101, 102)".
+// 6. In-use occupancy hints as grey tags (non-blocking).
 // ---------------------------------------------------------------------
 function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initialCategory = '' }) {
   // Helper to extract cottage name & unit number from a room row
   const getCottage = r => r.cottage_name || (r.room_number.includes(' - ') ? r.room_number.split(' - ')[0].trim() : r.room_number.trim())
   const getUnit = r => r.unit_no || (r.room_number.includes(' - ') ? r.room_number.split(' - ').slice(1).join(' - ').trim() : '')
 
-  // Determine initial category
+  // Determine initial category tab
   const [category, setCategory] = useState(() => {
     if (initialCategory && ROOM_CATEGORIES.includes(initialCategory)) return initialCategory
     if (sel.length > 0) {
@@ -565,12 +569,10 @@ function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initia
     return {}
   }
 
-  // Handle Category change: clears selection (never mix categories)
+  // Changing category controls view only; MUST NOT clear sel
   const handleCategoryChange = newCat => {
     if (newCat !== category) {
       setCategory(newCat)
-      setSel([])
-      setSelectedCottage('')
     }
   }
 
@@ -579,7 +581,7 @@ function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initia
   const deluxeCottages = Array.from(new Set(deluxeRooms.map(getCottage))).filter(Boolean).sort()
 
   const [selectedCottage, setSelectedCottage] = useState(() => {
-    if (category === 'Deluxe Room' && sel.length > 0) {
+    if (sel.length > 0) {
       const match = deluxeRooms.find(r => r.room_number === sel[0])
       if (match) return getCottage(match)
     }
@@ -601,14 +603,14 @@ function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initia
   const currentCottageSelected = sel.filter(lbl => currentCottageRooms.some(r => r.room_number === lbl))
 
   const handleDeluxeRoomsChange = newRoomLabels => {
-    // Preserve chosen rooms from other cottages, update for current cottage
-    const otherCottageSel = sel.filter(lbl => !currentCottageRooms.some(r => r.room_number === lbl))
-    setSel([...otherCottageSel, ...newRoomLabels])
+    // Preserve chosen rooms from other cottages & BHK categories, update for current cottage
+    const otherSel = sel.filter(lbl => !currentCottageRooms.some(r => r.room_number === lbl))
+    setSel([...otherSel, ...newRoomLabels])
   }
 
-  // BHK setup: multi-select cottages
-  const bhkRooms = rooms.filter(r => (r.room_type || '').toLowerCase() === category.toLowerCase())
-  const bhkCottages = bhkRooms.map(r => {
+  // BHK setup: villas of the current BHK category
+  const currentBhkVillas = rooms.filter(r => (r.room_type || '').toLowerCase() === category.toLowerCase())
+  const bhkVillaOptions = currentBhkVillas.map(r => {
     const cName = getCottage(r)
     const occ = getBhkCottageOccupancy(r.room_number, cName)
     return {
@@ -619,13 +621,50 @@ function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initia
     }
   }).sort((a, b) => a.label.localeCompare(b.label))
 
+  // In BHK category, current category selected values
+  const currentBhkSelected = sel.filter(lbl => currentBhkVillas.some(r => r.room_number === lbl))
+
+  const handleBhkVillasChange = newVillaLabels => {
+    // Preserve chosen items from other categories/cottages, update for current category
+    const otherSel = sel.filter(lbl => !currentBhkVillas.some(r => r.room_number === lbl))
+    setSel([...otherSel, ...newVillaLabels])
+  }
+
   // Removing a chip
   const handleRemoveChip = rm => {
     setSel(sel.filter(x => x !== rm))
   }
 
-  // Summary line: e.g. "Yellow (101, 102), Sai Cottage (101) - Deluxe Room" or "Karthik Cottage, Sai Cottage - 3 BHK"
-  const summaryText = sel.length > 0 ? `${L.formatRooms(sel)} - ${category}` : ''
+  // Clear all selections
+  const handleClearAll = () => {
+    setSel([])
+  }
+
+  // Helper to get category for any selected item
+  const getItemCategory = lbl => {
+    const match = rooms.find(r => r.room_number === lbl)
+    if (match && match.room_type) return match.room_type
+    if (lbl.includes(' - ')) return 'Deluxe Room'
+    return '1 BHK'
+  }
+
+  // Build grouped summary line, e.g. "2 BHK: Harsha Cottage, MS Cottage | 3 BHK: Sai Cottage | Deluxe: Yellow (101, 102)"
+  const summaryParts = []
+  ROOM_CATEGORIES.forEach(cat => {
+    const itemsInCat = sel.filter(lbl => getItemCategory(lbl) === cat)
+    if (itemsInCat.length > 0) {
+      const displayLabel = cat === 'Deluxe Room' ? 'Deluxe' : cat
+      const formatted = L.formatRooms(itemsInCat)
+      summaryParts.push(`${displayLabel}: ${formatted}`)
+    }
+  })
+  // Handle any items whose category wasn't in ROOM_CATEGORIES
+  const knownCatItems = new Set(ROOM_CATEGORIES.flatMap(cat => sel.filter(lbl => getItemCategory(lbl) === cat)))
+  const leftover = sel.filter(lbl => !knownCatItems.has(lbl))
+  if (leftover.length > 0) {
+    summaryParts.push(`Other: ${L.formatRooms(leftover)}`)
+  }
+  const summaryText = summaryParts.join(' | ')
 
   return (
     <div className="room-picker-container" id="field-room_numbers">
@@ -694,17 +733,17 @@ function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initia
             </div>
           </>
         ) : (
-          /* 3. BHK categories: Cottage(s) multi-select dropdown */
+          /* 3. BHK categories: Villa(s) multi-select dropdown with checkboxes */
           <div className="room-picker-col" style={{ flex: '2 1 340px' }}>
             <Dropdown
-              id="bhk-cottage-dropdown"
-              label="Cottage(s)"
+              id="bhk-villa-dropdown"
+              label="Villa(s)"
               required
               multiple={true}
-              value={sel}
-              onChange={setSel}
-              options={bhkCottages}
-              placeholder={`Select ${category} Cottage(s)...`}
+              value={currentBhkSelected}
+              onChange={handleBhkVillasChange}
+              options={bhkVillaOptions}
+              placeholder={`Select ${category} Villa(s)...`}
               searchable={true}
               error={Boolean(error && !sel.length)}
             />
@@ -712,27 +751,59 @@ function RoomPicker({ rooms = [], sel = [], setSel, occupied = [], error, initia
         )}
       </div>
 
-      {/* 4. Removable chips & summary line */}
+      {/* 4. Removable chips with category pill + Clear all link */}
       {sel.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <div className="room-chips-container">
-            {sel.map(lbl => (
-              <span key={lbl} className="room-chip">
-                <span>{lbl}</span>
-                <button
-                  type="button"
-                  className="room-chip-remove"
-                  onClick={() => handleRemoveChip(lbl)}
-                  title={`Remove ${lbl}`}
-                  aria-label={`Remove ${lbl}`}
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--navy-700)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Selected ({sel.length})
+            </span>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={handleClearAll}
+              style={{
+                fontSize: 11.5,
+                padding: '2px 6px',
+                minHeight: 'auto',
+                color: 'var(--status-due)',
+                fontWeight: 600,
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                textDecoration: 'underline'
+              }}
+            >
+              Clear all
+            </button>
           </div>
+          <div className="room-chips-container">
+            {sel.map(lbl => {
+              const cat = getItemCategory(lbl)
+              const isBhk = cat.includes('BHK')
+              return (
+                <span key={lbl} className="room-chip">
+                  <span className={`pill ${isBhk ? 'badge-navy' : 'badge-gold'}`} style={{ fontSize: 10, padding: '1px 6px', lineHeight: 1.2 }}>
+                    {cat === 'Deluxe Room' ? 'Deluxe' : cat}
+                  </span>
+                  <span>{lbl}</span>
+                  <button
+                    type="button"
+                    className="room-chip-remove"
+                    onClick={() => handleRemoveChip(lbl)}
+                    title={`Remove ${lbl}`}
+                    aria-label={`Remove ${lbl}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              )
+            })}
+          </div>
+
+          {/* Grouped summary line */}
           {summaryText && (
-            <div className="room-picker-summary">
+            <div className="room-picker-summary" style={{ marginTop: 8 }}>
               <b>Summary:</b> {summaryText}
             </div>
           )}
@@ -1089,9 +1160,9 @@ function CheckIn({ hotelId, onDone }) {
       errs.number_of_guests = 'Enter number of guests'
     }
 
-    // Rooms * (at least one room/cottage selected)
+    // Rooms * (at least one room or villa selected)
     if (!sel || sel.length === 0) {
-      errs.room_numbers = 'Please select at least one room'
+      errs.room_numbers = 'Please select at least one room or villa'
     }
 
     // Stay Nights >= 1 or Hours >= 1
@@ -1694,7 +1765,7 @@ function EditRooms({ s, hotelId, onClose }) {
     setError('')
     setBackendError('')
     if (!sel || !sel.length) {
-      setError('Please select at least one room')
+      setError('Please select at least one room or villa')
       return
     }
 
@@ -2559,152 +2630,857 @@ function Home({ hotelId }) {
 }
 
 // ---------------------------------------------------------------------
-// REPORT SCREEN (Filters with Room Category, Active Filter Chips & Ledger Table)
+// REPORT & LEDGER SCREEN
+// Presets in IST, auto-applied filters with debounce, proper Dropdown controls,
+// report_summary cards, Excel (xlsx), CSV (with UTF-8 BOM), and iframe print export.
 // ---------------------------------------------------------------------
-function Report({ hotelId }) {
-  const [f, setF] = useState({ status: 'CHECKED_OUT', paymentStatus: 'PAID', roomCategory: null })
+function Report({ hotelId, hotel = {} }) {
+  // Helper to format Date to IST YYYY-MM-DD
+  const formatISTDateOnly = d => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(d)
+  }
+
+  // Calculate preset ranges in IST
+  const getPresetDates = preset => {
+    const now = new Date()
+    const todayStr = formatISTDateOnly(now)
+    if (preset === 'Today') {
+      return { from: todayStr, to: todayStr }
+    } else if (preset === 'Yesterday') {
+      const y = new Date(now.getTime() - 86400000)
+      const yStr = formatISTDateOnly(y)
+      return { from: yStr, to: yStr }
+    } else if (preset === 'Last 7 days') {
+      const past = new Date(now.getTime() - 6 * 86400000)
+      return { from: formatISTDateOnly(past), to: todayStr }
+    } else if (preset === 'This month') {
+      const istParts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit'
+        }).formatToParts(now).map(p => [p.type, p.value])
+      )
+      const firstDayStr = `${istParts.year}-${istParts.month}-01`
+      return { from: firstDayStr, to: todayStr }
+    }
+    return { from: '', to: '' }
+  }
+
+  const [activePreset, setActivePreset] = useState('Today')
+  const defaultDates = getPresetDates('Today')
+
+  // Filter state: default everything to "All" (null), dateBasis default 'CHECKIN'
+  const [f, setF] = useState({
+    from: defaultDates.from,
+    to: defaultDates.to,
+    dateBasis: 'CHECKIN',
+    status: null,
+    source: null,
+    paymentMode: null,
+    paymentStatus: null,
+    extended: null,
+    roomCategory: null,
+    search: ''
+  })
+
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
   const [rows, setRows] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const [sources, setSources] = useState([])
+  const exportMenuRef = useRef(null)
+
+  // Actions & modals
   const [act, setAct] = useState(null)
   const [editRoomsStay, setEditRoomsStay] = useState(null)
   const [viewStayId, setViewStayId] = useState(null)
-  const [sources, setSources] = useState([])
 
-  const day = d => new Date(d + 'T00:00:00+05:30')
-  const load = () =>
-    L.getReport(
-      {
-        hotel: hotelId,
-        ...f,
-        from: f.from ? day(f.from).toISOString() : null,
-        to: f.to ? new Date(day(f.to).getTime() + 864e5).toISOString() : null
-      },
-      page
-    )
-      .then(setRows)
-      .catch(toast)
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!showExportMenu) return
+    const handleClick = e => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+        setShowExportMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showExportMenu])
 
   useEffect(() => {
-    L.getSources().then(setSources)
+    L.getSources().then(setSources).catch(console.error)
   }, [])
 
+  // Search input debounce ref
+  const [debouncedSearch, setDebouncedSearch] = useState(f.search)
   useEffect(() => {
-    load()
-  }, [hotelId, page])
+    const timer = setTimeout(() => {
+      setDebouncedSearch(f.search)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [f.search])
 
-  const set = k => e => setF({ ...f, [k]: e.target.value || null })
-  const total = rows[0]?.total_count || 0
+  // Reset page to 0 on any filter change
+  const updateFilter = updates => {
+    setPage(0)
+    setF(prev => ({ ...prev, ...updates }))
+  }
 
-  const activeFilters = []
-  if (f.status) activeFilters.push(`Status: ${f.status}`)
-  if (f.roomCategory) activeFilters.push(`Room Type: ${f.roomCategory}`)
-  if (f.paymentStatus) activeFilters.push(`Payment: ${f.paymentStatus}`)
-  if (f.source) activeFilters.push(`Source: ${f.source}`)
-  if (f.paymentMode) activeFilters.push(`Mode: ${f.paymentMode}`)
-  if (f.extended !== undefined && f.extended !== null) activeFilters.push(`Extended: ${f.extended ? 'Yes' : 'No'}`)
-  if (f.from) activeFilters.push(`From: ${f.from}`)
-  if (f.to) activeFilters.push(`To: ${f.to}`)
-  if (f.search) activeFilters.push(`Search: "${f.search}"`)
+  // Handle Preset selection
+  const handleSelectPreset = preset => {
+    setActivePreset(preset)
+    if (preset !== 'Custom') {
+      const dates = getPresetDates(preset)
+      updateFilter({ from: dates.from, to: dates.to })
+    }
+  }
+
+  // Reset all filters to Today + everything All
+  const handleReset = () => {
+    const tDates = getPresetDates('Today')
+    setActivePreset('Today')
+    setPage(0)
+    setF({
+      from: tDates.from,
+      to: tDates.to,
+      dateBasis: 'CHECKIN',
+      status: null,
+      source: null,
+      paymentMode: null,
+      paymentStatus: null,
+      extended: null,
+      roomCategory: null,
+      search: ''
+    })
+  }
+
+  // Query backend data
+  const loadData = async () => {
+    setLoading(true)
+    const effectiveFilters = {
+      ...f,
+      search: debouncedSearch,
+      hotel: hotelId
+    }
+
+    try {
+      const [tableRows, summaryData] = await Promise.all([
+        L.getReport(effectiveFilters, page, pageSize),
+        L.getReportSummary(effectiveFilters).catch(() => null)
+      ])
+      setRows(tableRows || [])
+
+      // If report_summary RPC returns data use it; otherwise compute KPI metrics from loaded tableRows
+      if (summaryData) {
+        setSummary(summaryData)
+      } else if (tableRows && tableRows.length > 0) {
+        const checkinsCount = Number(tableRows[0]?.total_count || tableRows.length)
+        const activeCount = tableRows.filter(r => r.status === 'ACTIVE').length
+        const checkoutCount = tableRows.filter(r => r.status === 'CHECKED_OUT').length
+        const extCount = tableRows.filter(r => (Number(r.extension_count) || 0) > 0).length
+        const totalRooms = tableRows.reduce((acc, r) => acc + (Array.isArray(r.room_numbers) ? r.room_numbers.length : 1), 0)
+        const totalGuests = tableRows.reduce((acc, r) => acc + (Number(r.number_of_guests) || 1), 0)
+        const totalBilled = tableRows.reduce((acc, r) => acc + (Number(r.total_amount) || 0), 0)
+        const totalPaid = tableRows.reduce((acc, r) => acc + (Number(r.total_paid) || 0), 0)
+        const totalBal = tableRows.reduce((acc, r) => acc + (Number(r.balance) || 0), 0)
+        const pendingStays = tableRows.filter(r => (Number(r.balance) || 0) > 0).length
+
+        const byCategory = {}
+        const byMode = {}
+        tableRows.forEach(r => {
+          if (r.room_category) {
+            byCategory[r.room_category] = (byCategory[r.room_category] || 0) + 1
+          }
+          if (r.payment_mode_summary) {
+            byMode[r.payment_mode_summary] = (byMode[r.payment_mode_summary] || 0) + (Number(r.total_paid) || 0)
+          }
+        })
+
+        setSummary({
+          checkins: checkinsCount,
+          active: activeCount,
+          checked_out: checkoutCount,
+          extended: extCount,
+          rooms: totalRooms,
+          guests: totalGuests,
+          billed: totalBilled,
+          paid: totalPaid,
+          balance: totalBal,
+          pending_count: pendingStays,
+          by_category: byCategory,
+          by_mode: byMode
+        })
+      } else {
+        setSummary({
+          checkins: 0,
+          active: 0,
+          checked_out: 0,
+          extended: 0,
+          rooms: 0,
+          guests: 0,
+          billed: 0,
+          paid: 0,
+          balance: 0,
+          pending_count: 0
+        })
+      }
+    } catch (e) {
+      toast(e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Automatically reload whenever filters, debounced search, page, or pageSize change
+  useEffect(() => {
+    loadData()
+  }, [hotelId, f.from, f.to, f.dateBasis, f.status, f.source, f.paymentMode, f.paymentStatus, f.extended, f.roomCategory, debouncedSearch, page, pageSize])
+
+  const totalCount = Number(rows[0]?.total_count || 0)
+
+  // Active filter chips list
+  const activeChips = []
+  if (activePreset && activePreset !== 'Custom') {
+    activeChips.push({ label: `Preset: ${activePreset}`, onRemove: () => handleSelectPreset('Custom') })
+  }
+  if (f.from || f.to) {
+    activeChips.push({ label: `Date: ${f.from || '...'} to ${f.to || '...'}`, onRemove: () => updateFilter({ from: '', to: '' }) })
+  }
+  if (f.dateBasis && f.dateBasis !== 'CHECKIN') {
+    activeChips.push({ label: `Basis: ${f.dateBasis === 'CHECKOUT' ? 'Check-out date' : 'In-house guests'}`, onRemove: () => updateFilter({ dateBasis: 'CHECKIN' }) })
+  }
+  if (f.status) {
+    activeChips.push({ label: `Status: ${f.status}`, onRemove: () => updateFilter({ status: null }) })
+  }
+  if (f.roomCategory) {
+    activeChips.push({ label: `Room Type: ${f.roomCategory}`, onRemove: () => updateFilter({ roomCategory: null }) })
+  }
+  if (f.source) {
+    activeChips.push({ label: `Source: ${f.source}`, onRemove: () => updateFilter({ source: null }) })
+  }
+  if (f.paymentMode) {
+    activeChips.push({ label: `Mode: ${f.paymentMode}`, onRemove: () => updateFilter({ paymentMode: null }) })
+  }
+  if (f.paymentStatus) {
+    activeChips.push({ label: `Payment: ${f.paymentStatus}`, onRemove: () => updateFilter({ paymentStatus: null }) })
+  }
+  if (f.extended !== null && f.extended !== undefined) {
+    activeChips.push({ label: `Extended: ${f.extended ? 'Yes' : 'No'}`, onRemove: () => updateFilter({ extended: null }) })
+  }
+  if (f.search) {
+    activeChips.push({ label: `Search: "${f.search}"`, onRemove: () => updateFilter({ search: '' }) })
+  }
+
+  // Export handlers
+  const handleExportExcel = async () => {
+    setExporting(true)
+    setShowExportMenu(false)
+    try {
+      const allRows = await L.exportReport({ ...f, search: debouncedSearch, hotel: hotelId })
+      const hotelCode = hotel?.code || 'HOTEL'
+      const fromStr = f.from || 'all'
+      const toStr = f.to || 'all'
+      const filename = `Starlight-${hotelCode}-Report_${fromStr}_to_${toStr}.xlsx`
+
+      // Sheet 1: Report data rows
+      const reportHeaders = [
+        'GRC No', 'Hotel', 'Guest Name', 'Mobile', 'Address', 'ID Proof', 'ID Number',
+        'Purpose', 'Room Type', 'Room(s)', 'Source', 'Booking ID', 'Guests', 'Rooms',
+        'Stay Duration', 'Check-in', 'Original Checkout', 'Current Checkout',
+        'Actual Checkout', 'Status', 'Extensions', 'Total Amount', 'Cash', 'Gpay',
+        'Card', 'Online', 'Total Paid', 'Balance', 'Payment Status', 'Receptionist'
+      ]
+
+      let totalAmountSum = 0
+      let totalCashSum = 0
+      let totalGpaySum = 0
+      let totalCardSum = 0
+      let totalOnlineSum = 0
+      let totalPaidSum = 0
+      let totalBalanceSum = 0
+
+      const dataRows = allRows.map(r => {
+        const amt = Number(r.total_amount) || 0
+        const paid = Number(r.total_paid) || 0
+        const bal = Number(r.balance) || 0
+        const cash = Number(r.cash_amount) || (r.payment_mode === 'CASH' ? paid : 0)
+        const gpay = Number(r.gpay_amount) || (r.payment_mode === 'GPAY' ? paid : 0)
+        const card = Number(r.card_amount) || (r.payment_mode === 'CARD' ? paid : 0)
+        const online = Number(r.online_amount) || (r.payment_mode === 'ONLINE' ? paid : 0)
+
+        totalAmountSum += amt
+        totalCashSum += cash
+        totalGpaySum += gpay
+        totalCardSum += card
+        totalOnlineSum += online
+        totalPaidSum += paid
+        totalBalanceSum += bal
+
+        return [
+          r.grc_number || '',
+          r.hotel_code || hotelCode,
+          r.guest_name || '',
+          r.mobile || '',
+          r.address || '',
+          r.id_proof_type || '',
+          r.id_proof_number || '',
+          r.purpose_of_visit || '',
+          r.room_category || '',
+          L.formatRooms(r.room_numbers),
+          r.booking_source || '',
+          r.booking_id || '',
+          Number(r.number_of_guests) || 1,
+          Array.isArray(r.room_numbers) ? r.room_numbers.length : 1,
+          r.stay_type === 'HOURLY' ? `${r.hours || 0} Hours` : `${r.nights || 1} Nights`,
+          L.fmtIST(r.checkin_at),
+          L.fmtIST(r.original_checkout_at),
+          L.fmtIST(r.current_checkout_at),
+          L.fmtIST(r.actual_checkout_at),
+          r.status || '',
+          Number(r.extension_count) || 0,
+          amt,
+          cash,
+          gpay,
+          card,
+          online,
+          paid,
+          bal,
+          r.payment_status || '',
+          r.receptionist_name || ''
+        ]
+      })
+
+      // Totals Row
+      const totalsRow = [
+        'TOTALS', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+        totalAmountSum, totalCashSum, totalGpaySum, totalCardSum, totalOnlineSum, totalPaidSum, totalBalanceSum, '', ''
+      ]
+
+      const wsReport = XLSX.utils.aoa_to_sheet([reportHeaders, ...dataRows, totalsRow])
+
+      // Auto column widths & freezing
+      wsReport['!cols'] = reportHeaders.map((h, i) => {
+        let maxLen = h.length
+        dataRows.slice(0, 30).forEach(row => {
+          const valStr = String(row[i] ?? '')
+          if (valStr.length > maxLen) maxLen = valStr.length
+        })
+        return { wch: Math.min(Math.max(maxLen + 3, 11), 35) }
+      })
+
+      // Freeze header row
+      wsReport['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft' }
+
+      // Sheet 2: Summary metrics
+      const wsSummary = XLSX.utils.aoa_to_sheet([
+        ['Starlight Hotels - Ledger Summary Report'],
+        ['Generated At (IST)', L.fmtIST(new Date().toISOString())],
+        ['Hotel', hotel?.name || hotelCode],
+        ['Date Range', `${f.from || 'All'} to ${f.to || 'All'}`],
+        ['Date Basis', f.dateBasis || 'CHECKIN'],
+        ['Status Filter', f.status || 'All'],
+        ['Room Category Filter', f.roomCategory || 'All'],
+        ['Source Filter', f.source || 'All'],
+        ['Payment Status Filter', f.paymentStatus || 'All'],
+        [],
+        ['Metric', 'Value'],
+        ['Total Check-ins', summary?.checkins ?? allRows.length],
+        ['Active Guests', summary?.active ?? 0],
+        ['Checked Out', summary?.checked_out ?? 0],
+        ['Extended', summary?.extended ?? 0],
+        ['Rooms Allocated', summary?.rooms ?? 0],
+        ['Total Guests', summary?.guests ?? 0],
+        ['Total Billed (INR)', summary?.billed ?? totalAmountSum],
+        ['Total Paid (INR)', summary?.paid ?? totalPaidSum],
+        ['Balance Due (INR)', summary?.balance ?? totalBalanceSum]
+      ])
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, wsReport, 'Report')
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+      XLSX.writeFile(wb, filename)
+    } catch (e) {
+      toast(e)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleExportCSV = async () => {
+    setExporting(true)
+    setShowExportMenu(false)
+    try {
+      const allRows = await L.exportReport({ ...f, search: debouncedSearch, hotel: hotelId })
+      const hotelCode = hotel?.code || 'HOTEL'
+      const fromStr = f.from || 'all'
+      const toStr = f.to || 'all'
+      const filename = `Starlight-${hotelCode}-Report_${fromStr}_to_${toStr}.csv`
+
+      const headers = [
+        'GRC No', 'Hotel', 'Guest Name', 'Mobile', 'Address', 'ID Proof', 'ID Number',
+        'Purpose', 'Room Type', 'Room(s)', 'Source', 'Booking ID', 'Guests', 'Rooms',
+        'Stay Duration', 'Check-in', 'Original Checkout', 'Current Checkout',
+        'Actual Checkout', 'Status', 'Extensions', 'Total Amount', 'Cash', 'Gpay',
+        'Card', 'Online', 'Total Paid', 'Balance', 'Payment Status', 'Receptionist'
+      ]
+
+      const csvRows = [headers.join(',')]
+      allRows.forEach(r => {
+        const amt = Number(r.total_amount) || 0
+        const paid = Number(r.total_paid) || 0
+        const bal = Number(r.balance) || 0
+        const cash = Number(r.cash_amount) || (r.payment_mode === 'CASH' ? paid : 0)
+        const gpay = Number(r.gpay_amount) || (r.payment_mode === 'GPAY' ? paid : 0)
+        const card = Number(r.card_amount) || (r.payment_mode === 'CARD' ? paid : 0)
+        const online = Number(r.online_amount) || (r.payment_mode === 'ONLINE' ? paid : 0)
+
+        const row = [
+          `"${r.grc_number || ''}"`,
+          `"${r.hotel_code || hotelCode}"`,
+          `"${(r.guest_name || '').replace(/"/g, '""')}"`,
+          `"${r.mobile || ''}"`,
+          `"${(r.address || '').replace(/"/g, '""')}"`,
+          `"${r.id_proof_type || ''}"`,
+          `"${r.id_proof_number || ''}"`,
+          `"${r.purpose_of_visit || ''}"`,
+          `"${r.room_category || ''}"`,
+          `"${L.formatRooms(r.room_numbers)}"`,
+          `"${r.booking_source || ''}"`,
+          `"${r.booking_id || ''}"`,
+          Number(r.number_of_guests) || 1,
+          Array.isArray(r.room_numbers) ? r.room_numbers.length : 1,
+          `"${r.stay_type === 'HOURLY' ? `${r.hours || 0} Hours` : `${r.nights || 1} Nights`}"`,
+          `"${L.fmtIST(r.checkin_at)}"`,
+          `"${L.fmtIST(r.original_checkout_at)}"`,
+          `"${L.fmtIST(r.current_checkout_at)}"`,
+          `"${L.fmtIST(r.actual_checkout_at)}"`,
+          `"${r.status || ''}"`,
+          Number(r.extension_count) || 0,
+          amt,
+          cash,
+          gpay,
+          card,
+          online,
+          paid,
+          bal,
+          `"${r.payment_status || ''}"`,
+          `"${r.receptionist_name || ''}"`
+        ]
+        csvRows.push(row.join(','))
+      })
+
+      // Add UTF-8 BOM (\uFEFF) so Excel renders rupee and special characters cleanly
+      const blob = new Blob(['\uFEFF' + csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      toast(e)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handlePrintPDF = async () => {
+    setExporting(true)
+    setShowExportMenu(false)
+    try {
+      const allRows = await L.exportReport({ ...f, search: debouncedSearch, hotel: hotelId })
+      const hotelName = hotel?.name || 'Starlight Hotels'
+      const hotelCode = hotel?.code || 'HOTEL'
+      const rangeText = `${f.from || 'All'} to ${f.to || 'All'}`
+
+      const totalBilled = allRows.reduce((acc, r) => acc + (Number(r.total_amount) || 0), 0)
+      const totalPaid = allRows.reduce((acc, r) => acc + (Number(r.total_paid) || 0), 0)
+      const totalBalance = allRows.reduce((acc, r) => acc + (Number(r.balance) || 0), 0)
+
+      const iframe = document.createElement('iframe')
+      iframe.style.position = 'fixed'
+      iframe.style.right = '0'
+      iframe.style.bottom = '0'
+      iframe.style.width = '0'
+      iframe.style.height = '0'
+      iframe.style.border = '0'
+      document.body.appendChild(iframe)
+
+      const doc = iframe.contentWindow.document
+      doc.open()
+      doc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${hotelName} - Ledger Report</title>
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; color: #162a4d; margin: 0; padding: 10px; }
+            .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #b8893a; padding-bottom: 8px; margin-bottom: 12px; }
+            .title { font-size: 18px; font-weight: bold; text-transform: uppercase; color: #162a4d; }
+            .sub { font-size: 11px; color: #666; margin-top: 3px; }
+            .meta { font-size: 11px; text-align: right; }
+            table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 8px; }
+            th, td { border: 1px solid #ddd; padding: 5px 6px; text-align: left; }
+            th { background: #f4f1ea; font-weight: 600; color: #162a4d; }
+            .num { text-align: right; font-variant-numeric: tabular-nums; }
+            .totals-row td { font-weight: bold; background: #faf8f5; border-top: 2px solid #b8893a; }
+            .badge { padding: 2px 5px; border-radius: 4px; font-size: 9px; font-weight: bold; }
+            .badge-paid { background: #e6f4ea; color: #0a7a3d; }
+            .badge-due { background: #fce8e6; color: #b3261e; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <div class="title">${hotelName}</div>
+              <div class="sub">Ledger & Stay Report &bull; Filter: ${rangeText} (Basis: ${f.dateBasis})</div>
+            </div>
+            <div class="meta">
+              Generated: ${L.fmtIST(new Date().toISOString())}<br>
+              Total Records: ${allRows.length}
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>GRC</th>
+                <th>Guest Name</th>
+                <th>Mobile</th>
+                <th>Room(s)</th>
+                <th>Category</th>
+                <th>Source</th>
+                <th>Check-in</th>
+                <th>Checkout</th>
+                <th class="num">Billed (₹)</th>
+                <th class="num">Paid (₹)</th>
+                <th class="num">Balance (₹)</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allRows.map(r => `
+                <tr>
+                  <td><b>${r.grc_number || ''}</b></td>
+                  <td>${r.guest_name || ''}</td>
+                  <td>${r.mobile || ''}</td>
+                  <td>${L.formatRooms(r.room_numbers)}</td>
+                  <td>${r.room_category || '—'}</td>
+                  <td>${r.booking_source || '—'}</td>
+                  <td>${L.fmtIST(r.checkin_at)}</td>
+                  <td>${L.fmtIST(r.actual_checkout_at || r.current_checkout_at)}</td>
+                  <td class="num">${Number(r.total_amount || 0).toLocaleString('en-IN')}</td>
+                  <td class="num">${Number(r.total_paid || 0).toLocaleString('en-IN')}</td>
+                  <td class="num" style="color: ${r.balance > 0 ? '#b3261e' : '#0a7a3d'}">${Number(r.balance || 0).toLocaleString('en-IN')}</td>
+                  <td><span class="badge ${r.balance > 0 ? 'badge-due' : 'badge-paid'}">${r.payment_status || r.status}</span></td>
+                </tr>
+              `).join('')}
+              <tr class="totals-row">
+                <td colspan="8">TOTALS (${allRows.length} Stays)</td>
+                <td class="num">₹${totalBilled.toLocaleString('en-IN')}</td>
+                <td class="num">₹${totalPaid.toLocaleString('en-IN')}</td>
+                <td class="num" style="color: ${totalBalance > 0 ? '#b3261e' : '#0a7a3d'}">₹${totalBalance.toLocaleString('en-IN')}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `)
+      doc.close()
+
+      setTimeout(() => {
+        iframe.contentWindow.focus()
+        iframe.contentWindow.print()
+        setTimeout(() => document.body.removeChild(iframe), 1500)
+      }, 300)
+    } catch (e) {
+      toast(e)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const presetsList = ['Today', 'Yesterday', 'Last 7 days', 'This month', 'Custom']
 
   return (
     <div className="page-container">
-      {/* Sticky Filter Card */}
-      <div className="filter-card">
-        <div className="card-header" style={{ marginBottom: 12 }}>
-          <h3 className="card-title">
-            <IconSearch /> Stay Ledger & Auditing Filters
-          </h3>
-          <button
-            className="btn-primary"
-            onClick={() => {
-              setPage(0)
-              load()
-            }}
-          >
-            Apply Filters
-          </button>
-        </div>
-
-        <div className="grid">
-          <label>
-            <span>From Date</span>
-            <input type="date" onChange={set('from')} />
-          </label>
-          <label>
-            <span>To Date</span>
-            <input type="date" onChange={set('to')} />
-          </label>
-          <label>
-            <span>Stay Status</span>
-            <select value={f.status || ''} onChange={set('status')}>
-              <option value="">All</option>
-              <option>ACTIVE</option>
-              <option>CHECKED_OUT</option>
-            </select>
-          </label>
-          <label>
-            <span>Room Type</span>
-            <select value={f.roomCategory || ''} onChange={set('roomCategory')}>
-              <option value="">All</option>
-              {ROOM_CATEGORIES.map(rc => (
-                <option key={rc} value={rc}>{rc}</option>
+      {/* Top Controls & Presets */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--navy-700)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Quick Presets:
+            </span>
+            <div className="report-presets-row" style={{ margin: 0 }}>
+              {presetsList.map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`preset-chip ${activePreset === p ? 'active' : ''}`}
+                  onClick={() => handleSelectPreset(p)}
+                >
+                  {p}
+                </button>
               ))}
-            </select>
-          </label>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button type="button" className="btn-ghost btn-sm" onClick={handleReset} title="Reset all filters to defaults">
+              Reset Filters
+            </button>
+            <div className="export-menu-wrap" ref={exportMenuRef}>
+              <button
+                type="button"
+                className="btn-gold btn-sm"
+                disabled={exporting || loading}
+                onClick={() => setShowExportMenu(v => !v)}
+              >
+                {exporting ? 'Exporting...' : 'Export'} <IconChevronDown />
+              </button>
+              {showExportMenu && (
+                <div className="export-menu-dropdown">
+                  <button type="button" className="export-menu-item" onClick={handleExportExcel}>
+                    <IconFileText /> Excel (.xlsx)
+                  </button>
+                  <button type="button" className="export-menu-item" onClick={handleExportCSV}>
+                    <IconFileText /> CSV (UTF-8)
+                  </button>
+                  <button type="button" className="export-menu-item" onClick={handlePrintPDF}>
+                    <IconPrinter /> PDF / Print
+                  </button>
+                </div>
+              )}
+            </div>
+            <button type="button" className="btn-primary btn-sm" onClick={loadData}>
+              Apply
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Controls Row 1: Dates & Basis */}
+        <div className="grid grid-cols-3" style={{ marginBottom: 12 }}>
           <label>
-            <span>Booking Source</span>
-            <select onChange={set('source')}>
-              <option value="">All</option>
-              {sources.map(s => <option key={s.name}>{s.name}</option>)}
-            </select>
+            <span>Date Range From (IST)</span>
+            <input
+              type="date"
+              value={f.from || ''}
+              onChange={e => {
+                setActivePreset('Custom')
+                updateFilter({ from: e.target.value })
+              }}
+            />
           </label>
+
           <label>
-            <span>Payment Mode</span>
-            <select onChange={set('paymentMode')}>
-              <option value="">All</option>
-              {MODES.map(m => <option key={m}>{m}</option>)}
-            </select>
+            <span>Date Range To (IST)</span>
+            <input
+              type="date"
+              value={f.to || ''}
+              onChange={e => {
+                setActivePreset('Custom')
+                updateFilter({ to: e.target.value })
+              }}
+            />
           </label>
-          <label>
-            <span>Payment Status</span>
-            <select value={f.paymentStatus || ''} onChange={set('paymentStatus')}>
-              <option value="">All</option>
-              <option>PAID</option>
-              <option>PARTIAL</option>
-              <option>PENDING</option>
-            </select>
-          </label>
-          <label>
-            <span>Extended Stay</span>
-            <select
-              onChange={e =>
-                setF({ ...f, extended: e.target.value === '' ? null : e.target.value === 'true' })
-              }
-            >
-              <option value="">All</option>
-              <option value="true">Yes</option>
-              <option value="false">No</option>
-            </select>
-          </label>
-          <label>
+
+          <Dropdown
+            id="filter-date-basis"
+            label="Date Based On"
+            value={f.dateBasis}
+            onChange={val => updateFilter({ dateBasis: val })}
+            options={[
+              { value: 'CHECKIN', label: 'Check-in date' },
+              { value: 'CHECKOUT', label: 'Check-out date' },
+              { value: 'INHOUSE', label: 'Guests in hotel during range' }
+            ]}
+            searchable={false}
+          />
+        </div>
+
+        {/* Filter Controls Row 2: Status, Source, Modes, Room Type */}
+        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+          <Dropdown
+            id="filter-status"
+            label="Stay Status"
+            value={f.status}
+            onChange={val => updateFilter({ status: val })}
+            options={[
+              { value: null, label: 'All Statuses' },
+              { value: 'ACTIVE', label: 'ACTIVE' },
+              { value: 'CHECKED_OUT', label: 'CHECKED_OUT' }
+            ]}
+            placeholder="All Statuses"
+            searchable={false}
+          />
+
+          <Dropdown
+            id="filter-room-category"
+            label="Room Type"
+            value={f.roomCategory}
+            onChange={val => updateFilter({ roomCategory: val })}
+            options={[
+              { value: null, label: 'All Room Types' },
+              ...ROOM_CATEGORIES.map(c => ({ value: c, label: c }))
+            ]}
+            placeholder="All Room Types"
+            searchable={false}
+          />
+
+          <Dropdown
+            id="filter-source"
+            label="Booking Source"
+            value={f.source}
+            onChange={val => updateFilter({ source: val })}
+            options={[
+              { value: null, label: 'All Sources' },
+              ...sources.map(s => ({ value: s.name, label: s.name }))
+            ]}
+            placeholder="All Sources"
+            searchable={true}
+          />
+
+          <Dropdown
+            id="filter-payment-mode"
+            label="Payment Mode"
+            value={f.paymentMode}
+            onChange={val => updateFilter({ paymentMode: val })}
+            options={[
+              { value: null, label: 'All Modes' },
+              ...MODES.map(m => ({ value: m, label: m }))
+            ]}
+            placeholder="All Modes"
+            searchable={false}
+          />
+
+          <Dropdown
+            id="filter-payment-status"
+            label="Payment Status"
+            value={f.paymentStatus}
+            onChange={val => updateFilter({ paymentStatus: val })}
+            options={[
+              { value: null, label: 'All Payment Status' },
+              { value: 'PAID', label: 'PAID' },
+              { value: 'PARTIAL', label: 'PARTIAL' },
+              { value: 'PENDING', label: 'PENDING' }
+            ]}
+            placeholder="All Payment Status"
+            searchable={false}
+          />
+
+          <Dropdown
+            id="filter-extended"
+            label="Extended"
+            value={f.extended === null ? null : (f.extended ? 'true' : 'false')}
+            onChange={val => updateFilter({ extended: val === null ? null : val === 'true' })}
+            options={[
+              { value: null, label: 'All' },
+              { value: 'true', label: 'Yes' },
+              { value: 'false', label: 'No' }
+            ]}
+            placeholder="All"
+            searchable={false}
+          />
+
+          <label style={{ minWidth: 200 }}>
             <span>Search Term</span>
-            <input placeholder="Name / Mobile / GRC / Room" onChange={set('search')} />
+            <input
+              placeholder="Name / Mobile / GRC / Room / ID"
+              value={f.search}
+              onChange={e => setF({ ...f, search: e.target.value })}
+            />
           </label>
         </div>
 
-        {activeFilters.length > 0 && (
-          <div className="active-filters-bar">
+        {/* Active Filter Chips */}
+        {activeChips.length > 0 && (
+          <div className="active-filters-bar" style={{ marginTop: 12 }}>
             <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--status-neutral)', fontWeight: 700 }}>
               Active Filters:
             </span>
-            {activeFilters.map((af, idx) => (
+            {activeChips.map((chip, idx) => (
               <span key={idx} className="active-filter-chip">
-                {af}
+                <span>{chip.label}</span>
+                <button
+                  type="button"
+                  className="room-chip-remove"
+                  onClick={chip.onRemove}
+                  style={{ marginLeft: 4 }}
+                >
+                  ✕
+                </button>
               </span>
             ))}
           </div>
         )}
       </div>
+
+      {/* Summary KPI Cards from report_summary */}
+      {summary && (
+        <div className="report-summary-grid">
+          <div className="summary-kpi-card">
+            <span className="summary-kpi-title">Total Check-ins</span>
+            <span className="summary-kpi-value">{summary.checkins ?? totalCount}</span>
+            <div className="summary-kpi-breakdown">
+              <span>Active: <b>{summary.active ?? 0}</b></span>
+              <span>Checkout: <b>{summary.checked_out ?? 0}</b></span>
+            </div>
+          </div>
+
+          <div className="summary-kpi-card">
+            <span className="summary-kpi-title">Rooms & Guests</span>
+            <span className="summary-kpi-value">{summary.rooms ?? 0} <span style={{ fontSize: 14, fontWeight: 400 }}>rooms</span></span>
+            <div className="summary-kpi-breakdown">
+              <span>Guests: <b>{summary.guests ?? 0}</b></span>
+              <span>Ext: <b>{summary.extended ?? 0}</b></span>
+            </div>
+          </div>
+
+          <div className="summary-kpi-card">
+            <span className="summary-kpi-title">Total Billed</span>
+            <span className="summary-kpi-value">{inr(summary.billed ?? 0)}</span>
+            {summary.by_category && (
+              <div className="summary-kpi-breakdown">
+                {Object.entries(summary.by_category).slice(0, 3).map(([cat, val]) => (
+                  <span key={cat} className="breakdown-item">{cat}: {val}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="summary-kpi-card">
+            <span className="summary-kpi-title">Total Paid</span>
+            <span className="summary-kpi-value" style={{ color: 'var(--status-paid)' }}>{inr(summary.paid ?? 0)}</span>
+            {summary.by_mode && (
+              <div className="summary-kpi-breakdown">
+                {Object.entries(summary.by_mode).map(([mode, val]) => (
+                  <span key={mode} className="breakdown-item">{mode}: {inr(val)}</span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="summary-kpi-card">
+            <span className="summary-kpi-title">Balance Due</span>
+            <span className={`summary-kpi-value ${(summary.balance || 0) > 0 ? 'due' : ''}`}>
+              {inr(summary.balance ?? 0)}
+            </span>
+            <div className="summary-kpi-breakdown">
+              <span>Pending stays: <b>{summary.pending_count ?? 0}</b></span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Ledger Table */}
       <div className="table-container">
@@ -2713,114 +3489,154 @@ function Report({ hotelId }) {
             <tr>
               <th>GRC</th>
               <th>Guest Details</th>
-              <th>Room</th>
+              <th>Room(s)</th>
               <th>Type</th>
               <th>Source</th>
               <th>Check-in (IST)</th>
               <th>Checkout (IST)</th>
-              <th>Total Tariff</th>
-              <th>Balance</th>
-              <th>Mode</th>
+              <th style={{ textAlign: 'right' }}>Total</th>
+              <th style={{ textAlign: 'right' }}>Paid</th>
+              <th style={{ textAlign: 'right' }}>Balance</th>
+              <th>Status</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(s => (
-              <tr key={s.id}>
-                <td>
-                  <span className="badge badge-navy tabular-nums">{s.grc_number}</span>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="guest-name-link"
-                    title="Click to view stay details"
-                    onClick={() => setViewStayId(s.id)}
-                  >
-                    {s.guest_name}
-                  </button>
-                  <small style={{ color: 'var(--status-neutral)', display: 'block' }} className="tabular-nums">{s.mobile}</small>
-                </td>
-                <td>
-                  <div style={{ fontWeight: 600 }}>{L.formatRooms(s.room_numbers)}</div>
-                </td>
-                <td>
-                  {s.room_category ? (
-                    <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`}>
-                      {s.room_category}
-                    </span>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td>
-                  <span className="pill badge-neutral">{s.booking_source}</span>
-                </td>
-                <td className="tabular-nums">{L.fmtIST(s.checkin_at)}</td>
-                <td className="tabular-nums">{L.fmtIST(s.actual_checkout_at || s.current_checkout_at)}</td>
-                <td className="tabular-nums font-serif" style={{ fontWeight: 600 }}>{inr(s.total_amount)}</td>
-                <td className={`tabular-nums ${s.balance > 0 ? 'due' : 'ok'}`} style={{ fontWeight: 700 }}>
-                  {inr(s.balance)}
-                </td>
-                <td>
-                  <span className="pill badge-gold">{s.payment_mode_summary || '—'}</span>
-                </td>
-                <td>
-                  <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
-                    <button
-                      className="btn-ghost btn-sm"
-                      title="View stay details"
-                      aria-label={`View stay details for ${s.guest_name}`}
-                      onClick={() => setViewStayId(s.id)}
-                    >
-                      <IconEye /> View
-                    </button>
-                    <button
-                      className="btn-ghost btn-sm"
-                      title="Reprint GRC"
-                      onClick={() => L.printGRC(s.id).catch(toast)}
-                    >
-                      <IconPrinter /> Print GRC
-                    </button>
-                    {s.balance > 0 && (
-                      <button
-                        className="btn-gold btn-sm"
-                        title="Collect Outstanding Balance"
-                        onClick={() => setAct({ s, type: 'balance' })}
-                      >
-                        <IconCreditCard /> Pay
-                      </button>
-                    )}
-                    <RowMoreMenu
-                      items={[
-                        { label: 'Change room', icon: <IconBed />, onClick: () => setEditRoomsStay(s) }
-                      ]}
-                    />
-                  </div>
+            {loading ? (
+              <tr>
+                <td colSpan="12" style={{ padding: 20 }}>
+                  <div className="skeleton-row" />
+                  <div className="skeleton-row" />
+                  <div className="skeleton-row" />
                 </td>
               </tr>
-            ))}
-            {!rows.length && (
+            ) : rows.length === 0 ? (
               <tr>
-                <td colSpan="11">
+                <td colSpan="12">
                   <div className="empty-state">
                     <div className="empty-state-icon">
                       <IconFileText />
                     </div>
-                    <h4>No Records Found</h4>
-                    <p>No stay records match the applied criteria. Adjust your date range or filters above.</p>
+                    <h4>No guests found for these filters</h4>
+                    <p>Try resetting filters or adjusting date ranges.</p>
                   </div>
                 </td>
               </tr>
+            ) : (
+              rows.map(s => (
+                <tr key={s.id}>
+                  <td>
+                    <span className="badge badge-navy tabular-nums">{s.grc_number}</span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="guest-name-link"
+                      title="Click to view stay details"
+                      onClick={() => setViewStayId(s.id)}
+                    >
+                      {s.guest_name}
+                    </button>
+                    <small style={{ color: 'var(--status-neutral)', display: 'block' }} className="tabular-nums">
+                      {s.mobile}
+                    </small>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{L.formatRooms(s.room_numbers)}</div>
+                  </td>
+                  <td>
+                    {s.room_category ? (
+                      <span className={`pill ${s.room_category.includes('BHK') ? 'badge-navy' : 'badge-gold'}`}>
+                        {s.room_category}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td>
+                    <span className="pill badge-neutral">{s.booking_source}</span>
+                  </td>
+                  <td className="tabular-nums">{L.fmtIST(s.checkin_at)}</td>
+                  <td className="tabular-nums">{L.fmtIST(s.actual_checkout_at || s.current_checkout_at)}</td>
+                  <td className="tabular-nums font-serif" style={{ textAlign: 'right', fontWeight: 600 }}>
+                    {inr(s.total_amount)}
+                  </td>
+                  <td className="tabular-nums font-serif" style={{ textAlign: 'right', color: 'var(--status-paid)', fontWeight: 600 }}>
+                    {inr(s.total_paid || 0)}
+                  </td>
+                  <td
+                    className={`tabular-nums font-serif ${s.balance > 0 ? 'due' : 'ok'}`}
+                    style={{ textAlign: 'right', fontWeight: 700 }}
+                  >
+                    {inr(s.balance)}
+                  </td>
+                  <td>
+                    <span className={`pill ${s.payment_status === 'PAID' ? 'badge-paid' : s.payment_status === 'PARTIAL' ? 'badge-partial' : 'badge-due'}`}>
+                      {s.payment_status || s.status}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="table-actions" style={{ justifyContent: 'flex-end' }}>
+                      <button
+                        className="btn-ghost btn-sm"
+                        title="View stay details"
+                        aria-label={`View stay details for ${s.guest_name}`}
+                        onClick={() => setViewStayId(s.id)}
+                      >
+                        <IconEye /> View
+                      </button>
+                      <button
+                        className="btn-ghost btn-sm"
+                        title="Reprint GRC"
+                        onClick={() => L.printGRC(s.id).catch(toast)}
+                      >
+                        <IconPrinter /> Print GRC
+                      </button>
+                      {s.balance > 0 && (
+                        <button
+                          className="btn-gold btn-sm"
+                          title="Collect Outstanding Balance"
+                          onClick={() => setAct({ s, type: 'balance' })}
+                        >
+                          <IconCreditCard /> Pay
+                        </button>
+                      )}
+                      <RowMoreMenu
+                        items={[
+                          { label: 'Change room', icon: <IconBed />, onClick: () => setEditRoomsStay(s) }
+                        ]}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
 
         {/* Pagination Footer */}
         <div className="pagination-bar">
-          <div>
-            Showing <b>{total === 0 ? 0 : page * 50 + 1}</b> – <b>{Math.min((page + 1) * 50, total)}</b> of <b>{total}</b> records
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span>
+              Showing <b>{totalCount === 0 ? 0 : page * pageSize + 1}</b> – <b>{Math.min((page + 1) * pageSize, totalCount)}</b> of <b>{totalCount}</b> records
+            </span>
+            <div className="table-page-selector">
+              <span>Page size:</span>
+              <select
+                className="page-size-select"
+                value={pageSize}
+                onChange={e => {
+                  setPage(0)
+                  setPageSize(Number(e.target.value))
+                }}
+              >
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
           </div>
+
           <div className="pagination-controls">
             <button
               className="btn-ghost btn-sm"
@@ -2830,11 +3646,11 @@ function Report({ hotelId }) {
               <IconChevronLeft /> Prev
             </button>
             <span style={{ padding: '0 8px' }}>
-              Page <b>{page + 1}</b> of <b>{Math.max(1, Math.ceil(total / 50))}</b>
+              Page <b>{page + 1}</b> of <b>{Math.max(1, Math.ceil(totalCount / pageSize))}</b>
             </span>
             <button
               className="btn-ghost btn-sm"
-              disabled={(page + 1) * 50 >= total}
+              disabled={(page + 1) * pageSize >= totalCount}
               onClick={() => setPage(page + 1)}
             >
               Next <IconChevronRight />
@@ -2848,7 +3664,7 @@ function Report({ hotelId }) {
           {...act}
           onClose={ok => {
             setAct(null)
-            ok && load()
+            ok && loadData()
           }}
         />
       )}
@@ -2859,7 +3675,7 @@ function Report({ hotelId }) {
           hotelId={hotelId}
           onClose={ok => {
             setEditRoomsStay(null)
-            ok && load()
+            ok && loadData()
           }}
         />
       )}
@@ -2868,7 +3684,7 @@ function Report({ hotelId }) {
         <ViewStay
           stayId={viewStayId}
           onClose={() => setViewStayId(null)}
-          onChanged={load}
+          onChanged={() => loadData()}
         />
       )}
     </div>
@@ -3227,7 +4043,7 @@ export default function App() {
               <div key={hotelId + tab}>
                 {tab === 'home' && <Home hotelId={hotelId} />}
                 {tab === 'in' && <CheckIn hotelId={hotelId} onDone={() => setTab('home')} />}
-                {tab === 'report' && <Report hotelId={hotelId} />}
+                {tab === 'report' && <Report hotelId={hotelId} hotel={currentHotel} />}
                 {tab === 'admin' && <Admin hotelId={hotelId} />}
               </div>
             )}

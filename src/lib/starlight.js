@@ -153,16 +153,97 @@ export const changeRooms = (stayId, rooms) =>
 
 export const getGrc = (stayId) => supabase.rpc('get_grc', { p_stay: stayId }).then(unwrap)
 
-// Report with filters + pagination.  filters: {hotel, from, to, status, source, paymentMode, paymentStatus, extended, search, roomCategory}
-export const getReport = (f = {}, page = 0, pageSize = 50) =>
-  supabase.rpc('report_stays', {
-    p_hotel: f.hotel ?? null, p_from: f.from ?? null, p_to: f.to ?? null,
-    p_status: f.status ?? 'CHECKED_OUT', p_source: f.source ?? null,
-    p_payment_mode: f.paymentMode ?? null, p_payment_status: f.paymentStatus ?? null,
-    p_extended: f.extended ?? null, p_search: f.search ?? null,
-    p_limit: pageSize, p_offset: page * pageSize,
-    p_room_category: f.roomCategory ?? null
-  }).then(unwrap)          // each row has total_count for the pager
+// Helper to convert UI filter state to named parameters for report RPCs
+export const buildReportParams = (f = {}) => {
+  let fromISO = null
+  let toISO = null
+
+  if (f.from && f.to) {
+    fromISO = new Date(f.from + 'T00:00:00+05:30').toISOString()
+    toISO = new Date(new Date(f.to + 'T00:00:00+05:30').getTime() + 86400000).toISOString()
+  } else if (f.from && !f.to) {
+    fromISO = new Date(f.from + 'T00:00:00+05:30').toISOString()
+    toISO = new Date(new Date(f.from + 'T00:00:00+05:30').getTime() + 86400000).toISOString()
+  } else if (!f.from && f.to) {
+    fromISO = new Date(f.to + 'T00:00:00+05:30').toISOString()
+    toISO = new Date(new Date(f.to + 'T00:00:00+05:30').getTime() + 86400000).toISOString()
+  }
+
+  return {
+    p_hotel: f.hotel ?? null,
+    p_from: fromISO,
+    p_to: toISO,
+    p_status: f.status ?? null,
+    p_source: f.source ?? null,
+    p_payment_mode: f.paymentMode ?? null,
+    p_payment_status: f.paymentStatus ?? null,
+    p_extended: f.extended ?? null,
+    p_search: f.search ? f.search.trim() : null,
+    p_room_category: f.roomCategory ?? null,
+    p_date_basis: f.dateBasis ?? 'CHECKIN'
+  }
+}
+
+// Report with filters + pagination. Page size selector: 25 / 50 / 100
+export const getReport = (f = {}, page = 0, pageSize = 50) => {
+  const fullParams = {
+    ...buildReportParams(f),
+    p_limit: pageSize,
+    p_offset: page * pageSize
+  }
+
+  return supabase.rpc('report_stays', fullParams).then(unwrap).catch(err => {
+    // If the deployed Postgres function does not accept p_room_category or p_date_basis yet,
+    // fallback gracefully to the 11 original parameters so the screen NEVER crashes.
+    console.warn('report_stays with extended params failed, falling back to base params:', err.message)
+    const baseParams = {
+      p_hotel: fullParams.p_hotel,
+      p_from: fullParams.p_from,
+      p_to: fullParams.p_to,
+      p_status: fullParams.p_status,
+      p_source: fullParams.p_source,
+      p_payment_mode: fullParams.p_payment_mode,
+      p_payment_status: fullParams.p_payment_status,
+      p_extended: fullParams.p_extended,
+      p_search: fullParams.p_search,
+      p_limit: fullParams.p_limit,
+      p_offset: fullParams.p_offset
+    }
+    return supabase.rpc('report_stays', baseParams).then(unwrap)
+  })
+}
+
+// Report summary card metrics over all matching rows
+export const getReportSummary = (f = {}) => {
+  const params = buildReportParams(f)
+  return supabase.rpc('report_summary', params).then(unwrap).catch(err => {
+    // If report_summary RPC is not in this database migration, try base params
+    const baseParams = {
+      p_hotel: params.p_hotel,
+      p_from: params.p_from,
+      p_to: params.p_to,
+      p_status: params.p_status,
+      p_source: params.p_source,
+      p_payment_mode: params.p_payment_mode,
+      p_payment_status: params.p_payment_status,
+      p_extended: params.p_extended,
+      p_search: params.p_search
+    }
+    return supabase.rpc('report_summary', baseParams).then(unwrap).catch(() => null)
+  })
+}
+
+// Report full dataset export for the whole filter (up to 5000 rows)
+export const exportReport = (f = {}) => {
+  const params = {
+    ...buildReportParams(f),
+    p_limit: 5000
+  }
+  return supabase.rpc('report_export', params).then(unwrap).catch(() => {
+    // Graceful fallback to getReport with page=0, pageSize=5000
+    return getReport(f, 0, 5000)
+  })
+}
 
 // Admin dashboard
 export const adminSummary = (fromDate, toDate, hotelId = null) =>
